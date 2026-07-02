@@ -9,9 +9,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-*.sqlite3
-*.db
-chroma_db/
 
 # ============================================
 # Node.js / Frontend
@@ -46,9 +43,6 @@ Thumbs.db
 # ============================================
 # Runtime / Data
 # ============================================
-*.sqlite3
-*.db
-chroma_db/
 logs/
 *.log
 
