@@ -1,0 +1,102 @@
+/**
+ * 管理员后台全局样式
+ * 极简商务浅色风格，主色调沉稳深蓝
+ */
+const style = document.createElement('style')
+style.textContent = `
+:root {
+  --primary: #1a3a5c;
+  --primary-light: #2c5f8a;
+  --primary-lighter: #e8f0f8;
+  --success: #67c23a;
+  --warning: #e6a23c;
+  --danger: #f56c6c;
+  --bg-color: #f0f2f5;
+  --card-bg: #ffffff;
+  --text-primary: #303133;
+  --text-secondary: #606266;
+  --text-light: #909399;
+  --border-color: #e4e7ed;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+}
+
+/* 卡片统一样式 */
+.el-card {
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  margin-bottom: 16px;
+}
+
+.el-card__header {
+  padding: 14px 20px;
+  border-bottom: 1px solid #f0f2f5;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+/* 表格样式 */
+.el-table {
+  border-radius: 8px;
+}
+
+.el-table th.el-table__cell {
+  background-color: var(--primary-lighter);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* 按钮样式 */
+.el-button--primary {
+  --el-button-bg-color: var(--primary);
+  --el-button-border-color: var(--primary);
+  --el-button-hover-bg-color: var(--primary-light);
+  --el-button-hover-border-color: var(--primary-light);
+  --el-button-active-bg-color: var(--primary);
+  --el-button-active-border-color: var(--primary);
+}
+
+/* 统计卡片 */
+.stat-card {
+  background: linear-gradient(135deg, var(--primary), var(--primary-light));
+  color: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+}
+
+.stat-card .value {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 8px 0;
+}
+
+.stat-card .label {
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+/* 页面标题 */
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--primary);
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--primary);
+  display: inline-block;
+}
+
+/* 搜索表单 */
+.search-form {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  align-items: center;
+}
+`
+document.head.appendChild(style)
