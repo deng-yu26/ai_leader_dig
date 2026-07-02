@@ -107,27 +107,27 @@ cd aileader
 python3 startup.py
 
 # 方式二：手动启动
+
+
+source backend/venv/bin/activate
 cd backend
-
-# 创建并激活虚拟环境（推荐）
-python3 -m venv venv
-source venv/bin/activate  # Mac/Linux
-# venv\Scripts\activate   # Windows
-
 # 安装依赖
 pip install -r requirements.txt
-
-# 初始化数据库
-python3 init_db.py
-
-# 启动Flask服务器
 python3 app.py
+
+
+
+# # 初始化数据库
+# python3 init_db.py
+
+# # 启动Flask服务器
+# python3 app.py
 ```
 
 后端启动后：
-- API服务：http://localhost:5000
-- WebSocket服务：ws://localhost:5000/ws/chat
-- 健康检查：http://localhost:5000/api/health
+- API服务：http://localhost:5001
+- WebSocket服务：ws://localhost:5001/ws/chat
+- 健康检查：http://localhost:5001/api/health
 
 ### 第二步：启动游客移动端H5
 
