@@ -37,6 +37,10 @@ export const getAdmins = () => api.get('/admin/admins')
 export const createAdmin = (data) => api.post('/admin/admins', data)
 
 // ===== 用户管理 =====
+export const getUsers = (params) => api.get('/admin/users', { params })
+export const deleteUser = (id) => api.delete(`/admin/users/${id}`)
+
+// ===== 旧版知识库（兼容） =====
 export const getKnowledgeList = (params) => api.get('/admin/knowledge', { params })
 export const createKnowledge = (data) => api.post('/admin/knowledge', data)
 export const updateKnowledge = (id, data) => api.put(`/admin/knowledge/${id}`, data)
