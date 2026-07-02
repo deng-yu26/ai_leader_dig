@@ -81,15 +81,62 @@ aileader/
         └── components/
 ```
 
-## 数据库设计（5张核心表）
+## 数据库设计（8张表）
+
+### 核心表（原有）
 
 | 表名 | 说明 | 核心字段 |
 |------|------|---------|
 | admin | 管理员表 | id, 账号, 密码(加密), 创建时间 |
 | user | 游客用户表 | id, 用户名, 密码(加密), 手机号, 邮箱, 注册时间 |
 | chat_log | 对话日志表 | id, 用户ID, 提问文本, AI回答, 时间, 情绪标签, 语音时长, 数字人ID, 音色, 图片路径 |
-| faq_knowledge | 知识库表 | id, 问题, 答案, 文档来源, 向量同步状态, 创建时间 |
+| faq_knowledge | FAQ知识库表（兼容） | id, 问题, 答案, 文档来源, 向量同步状态, 创建时间 |
 | digital_human | 数字人配置表 | id, 名称, 模型路径, 语速, 语调, 音色, 启用状态, 创建时间 |
+
+### 通用知识库（新增）
+
+| 表名 | 说明 | 核心字段 |
+|------|------|---------|
+| knowledge_category | 知识分类表 | id, 名称, 编码, 描述, 图标, 排序, 状态, 创建时间 |
+| knowledge | 通用知识库表 | id, 分类ID, 标题, 内容, 标签, 来源文件, 关键词, 版本, 向量同步, 状态, 排序, 创建/更新时间 |
+| knowledge_version | 知识版本历史表 | id, 知识ID, 版本, 标题, 内容, 标签, 关键词, 创建时间 |
+
+### 默认知识分类
+
+| 分类名称 | 编码 | 描述 |
+|---------|------|------|
+| 常见问答 | faq | 游客常见问题的问答对 |
+| 景点讲解词 | scene_intro | 各景点的详细讲解文案 |
+| 文史资料 | history | 景区历史文化背景资料 |
+| 基本信息 | basic_info | 门票、交通、开放时间等 |
+| 游览路线 | route | 推荐游览路线规划 |
+
+## 知识库管理新功能
+
+### 后端 API（新版）
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/admin/knowledge/categories` | GET/POST | 获取/创建知识分类 |
+| `/admin/knowledge/categories/<id>` | PUT/DELETE | 更新/删除分类 |
+| `/admin/knowledge/list` | GET | 获取知识库列表（支持分类/关键词/标签/状态/排序多维度筛选） |
+| `/admin/knowledge/item` | POST | 创建知识条目（自动同步向量库） |
+| `/admin/knowledge/item/<id>` | PUT/DELETE | 更新（带版本控制）/删除知识条目 |
+| `/admin/knowledge/item/<id>/versions` | GET | 获取版本历史 |
+| `/admin/knowledge/item/<id>/restore/<vid>` | POST | 恢复到指定版本 |
+| `/admin/knowledge/batch/import` | POST | 批量导入（JSON格式） |
+| `/admin/knowledge/batch/export` | GET | 批量导出（JSON格式） |
+| `/admin/knowledge/batch/delete` | POST | 批量删除 |
+| `/admin/knowledge/search` | GET | 多维度搜索 |
+| `/admin/knowledge/detect` | POST | 上传文件自动检测知识类型并提取关键词 |
+
+### 前端界面优化
+
+- **筛选栏**：分类筛选、关键词搜索、标签筛选、状态筛选、排序方式
+- **批量操作**：批量导入（JSON）、批量导出、批量删除
+- **版本历史**：查看知识条目的历史版本，支持恢复到任意版本
+- **分类管理**：可视化管理知识分类
+- **文件自动检测**：上传文件后自动识别类型（FAQ/讲解词/文史/基本信息/路线），提取关键词
 
 ## 快速启动
 
@@ -100,13 +147,9 @@ aileader/
 ### 第一步：启动后端服务
 
 ```bash
-# 进入项目根目录
-cd aileader
 
-# 方式一：一键启动（推荐）
-python3 startup.py
 
-# 方式二：手动启动
+# 手动启动
 
 
 source backend/venv/bin/activate

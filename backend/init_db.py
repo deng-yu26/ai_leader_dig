@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask
-from models import db, Admin, DigitalHuman
+from models import db, Admin, DigitalHuman, KnowledgeCategory
 from config import (
     SQLALCHEMY_DATABASE_URI,
     SQLALCHEMY_TRACK_MODIFICATIONS,
@@ -88,6 +88,10 @@ def init_database():
                 print(f"[✓] 默认数字人创建完成：{dh_data['name']}")
             else:
                 print(f"[i] 数字人 {dh_data['name']} 已存在，跳过创建")
+
+        # ===== 初始化知识分类 =====
+        KnowledgeCategory.init_defaults()
+        print("[✓] 知识分类初始化完成")
 
         db.session.commit()
         print("\n[✓] 数据库初始化全部完成！")

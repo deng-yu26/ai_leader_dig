@@ -15,7 +15,7 @@ from typing import List, Dict
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Blueprint, request, jsonify, session
-from models import db, Admin, User, ChatLog, FaqKnowledge, DigitalHuman
+from models import db, Admin, User, ChatLog, FaqKnowledge, DigitalHuman, Knowledge, KnowledgeCategory, KnowledgeVersion
 from services.rag_service import get_knowledge_processor
 from services.llm_service import get_llm_service
 
@@ -317,7 +317,7 @@ def delete_knowledge(k_id):
 @admin_bp.route("/knowledge/sync", methods=["POST"])
 @admin_required
 def sync_knowledge():
-    """一键同步知识库到向量库（文档目录 + FAQ表）"""
+    """一键同步知识库到向量库（文档目录 + FAQ表 + 通用知识库）"""
     try:
         processor = get_knowledge_processor()
 
@@ -325,9 +325,9 @@ def sync_knowledge():
         doc_count = processor.build_knowledge_base()
 
         # 2. 同步FAQ表中的知识（未同步的条目）
-        unsynced = FaqKnowledge.query.filter_by(vector_sync=False).all()
+        unsynced_faq = FaqKnowledge.query.filter_by(vector_sync=False).all()
         faq_docs = []
-        for faq in unsynced:
+        for faq in unsynced_faq:
             faq_docs.append({
                 "id": f"faq_{faq.id}",
                 "text": f"问题：{faq.question}\n答案：{faq.answer}",
@@ -339,15 +339,31 @@ def sync_knowledge():
 
         if faq_docs:
             processor.vector_db.add_documents(faq_docs)
-
-        # 标记全部已同步
         FaqKnowledge.query.update({FaqKnowledge.vector_sync: True})
+
+        # 3. 同步通用知识库（未同步的条目）
+        unsynced_knowledge = Knowledge.query.filter_by(vector_sync=False, is_active=True).all()
+        knowledge_docs = []
+        for k in unsynced_knowledge:
+            knowledge_docs.append({
+                "id": f"knowledge_{k.id}",
+                "text": f"标题：{k.title}\n内容：{k.content}",
+                "metadata": {
+                    "source": k.category.name if k.category else "未知",
+                    "type": k.category.code if k.category else "unknown",
+                    "id": k.id
+                }
+            })
+
+        if knowledge_docs:
+            processor.vector_db.add_documents(knowledge_docs)
+        Knowledge.query.filter_by(vector_sync=False, is_active=True).update({Knowledge.vector_sync: True})
         db.session.commit()
 
         return jsonify({
             "code": 200,
-            "message": f"向量库同步完成，文档{doc_count}条 + FAQ{len(faq_docs)}条",
-            "data": {"doc_count": doc_count, "faq_count": len(faq_docs)}
+            "message": f"向量库同步完成，文档{doc_count}条 + FAQ{len(faq_docs)}条 + 知识库{len(knowledge_docs)}条",
+            "data": {"doc_count": doc_count, "faq_count": len(faq_docs), "knowledge_count": len(knowledge_docs)}
         })
     except Exception as e:
         return jsonify({"code": 500, "message": f"同步失败：{str(e)}"})
@@ -421,7 +437,44 @@ def upload_knowledge_file():
 
         processor.vector_db.add_documents(documents)
 
-        # 同时在FAQ表中添加一条记录（用于管理展示）
+        # 自动检测知识类型
+        detected_type = "faq"
+        scene_keywords = ["景点", "讲解", "介绍", "景观", "建筑", "佛像", "大佛", "梵宫"]
+        history_keywords = ["历史", "文化", "古代", "朝代", "佛教", "传统", "习俗", "典故"]
+        info_keywords = ["门票", "交通", "停车", "开放时间", "价格", "门票价格", "游玩时间"]
+        route_keywords = ["路线", "行程", "攻略", "游览", "推荐路线", "游玩顺序"]
+
+        text_lower = text.lower()
+        scores = {
+            "faq": sum(1 for q in ["如何", "怎么", "什么", "吗", "?", "？"] if q in text_lower),
+            "scene_intro": sum(1 for kw in scene_keywords if kw in text_lower),
+            "history": sum(1 for kw in history_keywords if kw in text_lower),
+            "basic_info": sum(1 for kw in info_keywords if kw in text_lower),
+            "route": sum(1 for kw in route_keywords if kw in text_lower),
+        }
+        detected_type = max(scores, key=scores.get)
+        category_map = {
+            "faq": "faq", "scene_intro": "scene_intro",
+            "history": "history", "basic_info": "basic_info", "route": "route"
+        }
+
+        # 在通用知识库中创建记录
+        cat = KnowledgeCategory.query.filter_by(code=category_map.get(detected_type, "faq")).first()
+        if cat:
+            keywords = _extract_keywords(text, top_k=8)
+            knowledge = Knowledge(
+                category_id=cat.id,
+                title=f"【文件】{file.filename}",
+                content=text[:2000] + ("..." if len(text) > 2000 else ""),
+                tags=", ".join(keywords),
+                source_file=file.filename,
+                keywords=", ".join(keywords),
+                vector_sync=True,
+                is_active=True
+            )
+            db.session.add(knowledge)
+
+        # 同时在FAQ表中添加一条记录（保持兼容）
         faq = FaqKnowledge(
             question=f"【文件】{file.filename}",
             answer=text[:500] + ("..." if len(text) > 500 else ""),
@@ -433,8 +486,8 @@ def upload_knowledge_file():
 
         return jsonify({
             "code": 200,
-            "message": f"文件上传成功，共提取 {len(chunks)} 个文档块",
-            "data": {"chunks": len(chunks), "filename": file.filename}
+            "message": f"文件上传成功，共提取 {len(chunks)} 个文档块，检测到类型: {detected_type}",
+            "data": {"chunks": len(chunks), "filename": file.filename, "detected_type": detected_type}
         })
     except Exception as e:
         return jsonify({"code": 500, "message": f"文件处理失败：{str(e)}"})
@@ -625,17 +678,724 @@ def knowledge_stats():
         vd = processor.vector_db
         faq_count = FaqKnowledge.query.count()
         doc_count = vd.get_document_count() if vd.collection else 0
+        knowledge_count = Knowledge.query.filter_by(is_active=True).count()
+        category_count = KnowledgeCategory.query.filter_by(is_active=True).count()
+
+        # 按分类统计
+        category_stats = {}
+        for cat in KnowledgeCategory.query.filter_by(is_active=True).all():
+            count = Knowledge.query.filter_by(category_id=cat.id, is_active=True).count()
+            category_stats[cat.code] = {"name": cat.name, "count": count}
 
         return jsonify({
             "code": 200,
             "data": {
                 "vector_doc_count": doc_count,
                 "faq_count": faq_count,
-                "vector_sync_count": FaqKnowledge.query.filter_by(vector_sync=True).count()
+                "vector_sync_count": FaqKnowledge.query.filter_by(vector_sync=True).count(),
+                "knowledge_count": knowledge_count,
+                "category_count": category_count,
+                "category_stats": category_stats
             }
         })
     except Exception as e:
         return jsonify({"code": 500, "message": f"统计失败：{str(e)}"})
+
+
+# ======================== 知识库分类管理 ========================
+@admin_bp.route("/knowledge/categories", methods=["GET"])
+@admin_required
+def list_categories():
+    """获取知识分类列表"""
+    categories = KnowledgeCategory.query.filter_by(is_active=True).order_by(KnowledgeCategory.sort_order).all()
+    return jsonify({
+        "code": 200,
+        "data": [c.to_dict() for c in categories]
+    })
+
+
+@admin_bp.route("/knowledge/categories", methods=["POST"])
+@admin_required
+def create_category():
+    """创建知识分类"""
+    data = request.get_json()
+    if not data or not data.get("name") or not data.get("code"):
+        return jsonify({"code": 400, "message": "分类名称和编码不能为空"})
+
+    existing = KnowledgeCategory.query.filter_by(code=data["code"]).first()
+    if existing:
+        return jsonify({"code": 400, "message": "分类编码已存在"})
+
+    cat = KnowledgeCategory(
+        name=data["name"],
+        code=data["code"],
+        description=data.get("description", ""),
+        icon=data.get("icon", ""),
+        sort_order=data.get("sort_order", 0),
+        is_active=data.get("is_active", True)
+    )
+    db.session.add(cat)
+    db.session.commit()
+    return jsonify({"code": 200, "message": "创建成功", "data": cat.to_dict()})
+
+
+@admin_bp.route("/knowledge/categories/<int:cat_id>", methods=["PUT"])
+@admin_required
+def update_category(cat_id):
+    """更新知识分类"""
+    cat = KnowledgeCategory.query.get(cat_id)
+    if not cat:
+        return jsonify({"code": 404, "message": "分类不存在"})
+
+    data = request.get_json()
+    if data.get("name") is not None:
+        cat.name = data["name"]
+    if data.get("description") is not None:
+        cat.description = data["description"]
+    if data.get("icon") is not None:
+        cat.icon = data["icon"]
+    if data.get("sort_order") is not None:
+        cat.sort_order = data["sort_order"]
+    if data.get("is_active") is not None:
+        cat.is_active = data["is_active"]
+
+    db.session.commit()
+    return jsonify({"code": 200, "message": "更新成功", "data": cat.to_dict()})
+
+
+@admin_bp.route("/knowledge/categories/<int:cat_id>", methods=["DELETE"])
+@admin_required
+def delete_category(cat_id):
+    """删除知识分类"""
+    cat = KnowledgeCategory.query.get(cat_id)
+    if not cat:
+        return jsonify({"code": 404, "message": "分类不存在"})
+
+    # 检查是否有关联的知识条目
+    count = Knowledge.query.filter_by(category_id=cat_id).count()
+    if count > 0:
+        return jsonify({"code": 400, "message": f"该分类下还有 {count} 条知识内容，请先迁移或删除"})
+
+    db.session.delete(cat)
+    db.session.commit()
+    return jsonify({"code": 200, "message": "删除成功"})
+
+
+# ======================== 通用知识库管理 ========================
+@admin_bp.route("/knowledge/list", methods=["GET"])
+@admin_required
+def list_knowledge_v2():
+    """获取知识库列表（新版，合并展示 knowledge 表 + faq_knowledge 表）"""
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 20, type=int)
+
+    # 筛选条件
+    category = request.args.get("category", "")        # 分类编码
+    keyword = request.args.get("keyword", "")           # 关键词搜索
+    tags = request.args.get("tags", "")                 # 标签筛选
+    is_active = request.args.get("is_active")           # 状态筛选
+    sort_by = request.args.get("sort_by", "created_at") # 排序字段
+    sort_order = request.args.get("sort_order", "desc")  # 排序方向
+
+    # ========== 1. 查询新 knowledge 表 ==========
+    new_query = Knowledge.query
+    if category:
+        cat = KnowledgeCategory.query.filter_by(code=category).first()
+        if cat:
+            new_query = new_query.filter_by(category_id=cat.id)
+        else:
+            new_query = new_query.filter_by(category_id=-1)
+    if keyword:
+        new_query = new_query.filter(
+            db.or_(
+                Knowledge.title.contains(keyword),
+                Knowledge.content.contains(keyword),
+                Knowledge.tags.contains(keyword),
+                Knowledge.keywords.contains(keyword)
+            )
+        )
+    if tags:
+        new_query = new_query.filter(Knowledge.tags.contains(tags))
+    if is_active and is_active.strip():
+        if is_active.lower() in ("true", "1", "yes"):
+            new_query = new_query.filter_by(is_active=True)
+        else:
+            new_query = new_query.filter_by(is_active=False)
+
+    # ========== 2. 查询旧 faq_knowledge 表 ==========
+    old_query = FaqKnowledge.query
+    if category:
+        if category == "faq":
+            pass  # 不过滤
+        else:
+            old_query = old_query.filter_by(id=-1)  # 排除
+    if keyword:
+        old_query = old_query.filter(FaqKnowledge.question.contains(keyword) | FaqKnowledge.answer.contains(keyword))
+
+    # 获取所有 knowledge 表的标题，用于去重（已迁移的 FAQ 不再展示）
+    existing_titles = set(k[0] for k in Knowledge.query.with_entities(Knowledge.title).all())
+
+    # ========== 3. 合并结果为统一格式 ==========
+    items = []
+
+    # 新表
+    for k in new_query.all():
+        items.append({
+            "id": k.id,
+            "source": "knowledge",
+            "category_id": k.category_id,
+            "category": k.category.to_dict() if k.category else None,
+            "title": k.title,
+            "content": k.content,
+            "tags": k.tags,
+            "source_file": k.source_file or "",
+            "keywords": k.keywords,
+            "version": k.version,
+            "vector_sync": k.vector_sync,
+            "is_active": k.is_active,
+            "sort_order": k.sort_order,
+            "created_at": k.created_at,
+            "updated_at": k.updated_at,
+        })
+
+    # 旧表 — 兼容展示（跳过已迁移的条目）
+    faq_cat = KnowledgeCategory.query.filter_by(code="faq").first()
+    faq_cat_dict = faq_cat.to_dict() if faq_cat else None
+    for f in old_query.all():
+        # 去重：如果该 FAQ 问题已存在于 knowledge 表中，跳过
+        if f.question and f.question.strip() in existing_titles:
+            continue
+        items.append({
+            "id": f.id,
+            "source": "faq",
+            "category_id": faq_cat.id if faq_cat else None,
+            "category": faq_cat_dict,
+            "title": f.question,
+            "content": f.answer,
+            "tags": "",
+            "source_file": f.doc_source or "手动录入",
+            "keywords": "",
+            "version": 1,
+            "vector_sync": f.vector_sync,
+            "is_active": True,
+            "sort_order": 0,
+            "created_at": f.created_at,
+            "updated_at": f.created_at,
+        })
+
+    # ========== 4. 排序 ==========
+    DATETIME_FIELDS = {"created_at", "updated_at"}
+
+    def get_sort_key(item):
+        val = item.get(sort_by)
+        if val is None:
+            return datetime.min if sort_by in DATETIME_FIELDS else ""
+        return val
+
+    if sort_order.lower() == "asc":
+        items.sort(key=get_sort_key)
+    else:
+        items.sort(key=get_sort_key, reverse=True)
+
+    # ========== 5. 手动分页 ==========
+    total = len(items)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_items = items[start:end]
+
+    # 格式化时间
+    for item in page_items:
+        item["created_at"] = item["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+        item["updated_at"] = item["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+
+    return jsonify({
+        "code": 200,
+        "data": {
+            "items": page_items,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": (total + per_page - 1) // per_page if per_page > 0 else 0
+        }
+    })
+
+
+@admin_bp.route("/knowledge/item", methods=["POST"])
+@admin_required
+def create_knowledge_v2():
+    """创建知识条目（新版）"""
+    data = request.get_json()
+    if not data or not data.get("title") or not data.get("content"):
+        return jsonify({"code": 400, "message": "标题和内容不能为空"})
+
+    # 获取分类
+    category_id = data.get("category_id")
+    if not category_id:
+        return jsonify({"code": 400, "message": "请选择知识分类"})
+
+    cat = KnowledgeCategory.query.get(category_id)
+    if not cat:
+        return jsonify({"code": 404, "message": "知识分类不存在"})
+
+    knowledge = Knowledge(
+        category_id=category_id,
+        title=data["title"],
+        content=data["content"],
+        tags=data.get("tags", ""),
+        source_file=data.get("source_file", ""),
+        keywords=data.get("keywords", ""),
+        sort_order=data.get("sort_order", 0),
+        is_active=data.get("is_active", True)
+    )
+    db.session.add(knowledge)
+    db.session.commit()
+
+    # 自动添加到向量库
+    try:
+        processor = get_knowledge_processor()
+        processor.vector_db.add_documents([{
+            "id": f"knowledge_{knowledge.id}",
+            "text": f"标题：{knowledge.title}\n内容：{knowledge.content}",
+            "metadata": {"source": cat.name, "type": cat.code, "id": knowledge.id}
+        }])
+        knowledge.vector_sync = True
+        db.session.commit()
+    except Exception as e:
+        print(f"[Warning] 向量库自动同步失败：{e}")
+
+    return jsonify({"code": 200, "message": "创建成功", "data": knowledge.to_dict()})
+
+
+@admin_bp.route("/knowledge/item/<int:k_id>", methods=["PUT"])
+@admin_required
+def update_knowledge_v2(k_id):
+    """更新知识条目（新版，带版本控制）"""
+    knowledge = Knowledge.query.get(k_id)
+    if not knowledge:
+        return jsonify({"code": 404, "message": "知识条目不存在"})
+
+    data = request.get_json()
+
+    # 保存版本历史
+    version_record = KnowledgeVersion(
+        knowledge_id=knowledge.id,
+        version=knowledge.version,
+        title=knowledge.title,
+        content=knowledge.content,
+        tags=knowledge.tags,
+        keywords=knowledge.keywords
+    )
+    db.session.add(version_record)
+
+    # 更新字段
+    if data.get("category_id") is not None:
+        knowledge.category_id = data["category_id"]
+    if data.get("title") is not None:
+        knowledge.title = data["title"]
+    if data.get("content") is not None:
+        knowledge.content = data["content"]
+    if data.get("tags") is not None:
+        knowledge.tags = data["tags"]
+    if data.get("keywords") is not None:
+        knowledge.keywords = data["keywords"]
+    if data.get("sort_order") is not None:
+        knowledge.sort_order = data["sort_order"]
+    if data.get("is_active") is not None:
+        knowledge.is_active = data["is_active"]
+
+    knowledge.version += 1
+    knowledge.vector_sync = False  # 标记需要重新同步
+    db.session.commit()
+
+    return jsonify({"code": 200, "message": "更新成功", "data": knowledge.to_dict()})
+
+
+@admin_bp.route("/knowledge/item/<int:k_id>", methods=["DELETE"])
+@admin_required
+def delete_knowledge_v2(k_id):
+    """删除知识条目（新版）"""
+    knowledge = Knowledge.query.get(k_id)
+    if not knowledge:
+        return jsonify({"code": 404, "message": "知识条目不存在"})
+
+    # 同时删除版本历史
+    KnowledgeVersion.query.filter_by(knowledge_id=k_id).delete()
+    db.session.delete(knowledge)
+    db.session.commit()
+    return jsonify({"code": 200, "message": "删除成功"})
+
+
+@admin_bp.route("/knowledge/item/<int:k_id>/versions", methods=["GET"])
+@admin_required
+def get_knowledge_versions(k_id):
+    """获取知识条目的版本历史"""
+    knowledge = Knowledge.query.get(k_id)
+    if not knowledge:
+        return jsonify({"code": 404, "message": "知识条目不存在"})
+
+    versions = KnowledgeVersion.query.filter_by(knowledge_id=k_id).order_by(KnowledgeVersion.version.desc()).all()
+    return jsonify({
+        "code": 200,
+        "data": {
+            "current_version": knowledge.version,
+            "versions": [v.to_dict() for v in versions]
+        }
+    })
+
+
+@admin_bp.route("/knowledge/item/<int:k_id>/restore/<int:version_id>", methods=["POST"])
+@admin_required
+def restore_knowledge_version(k_id, version_id):
+    """恢复到指定版本"""
+    knowledge = Knowledge.query.get(k_id)
+    if not knowledge:
+        return jsonify({"code": 404, "message": "知识条目不存在"})
+
+    version = KnowledgeVersion.query.get(version_id)
+    if not version or version.knowledge_id != k_id:
+        return jsonify({"code": 404, "message": "版本不存在"})
+
+    # 保存当前版本为历史
+    current_record = KnowledgeVersion(
+        knowledge_id=knowledge.id,
+        version=knowledge.version,
+        title=knowledge.title,
+        content=knowledge.content,
+        tags=knowledge.tags,
+        keywords=knowledge.keywords
+    )
+    db.session.add(current_record)
+
+    # 恢复
+    knowledge.title = version.title
+    knowledge.content = version.content
+    knowledge.tags = version.tags
+    knowledge.keywords = version.keywords
+    knowledge.version += 1
+    knowledge.vector_sync = False
+    db.session.commit()
+
+    return jsonify({"code": 200, "message": f"已恢复到版本 v{version.version}", "data": knowledge.to_dict()})
+
+
+# ======================== 批量操作 ========================
+@admin_bp.route("/knowledge/batch/import", methods=["POST"])
+@admin_required
+def batch_import_knowledge():
+    """批量导入知识条目（JSON格式）"""
+    data = request.get_json()
+    if not data or not isinstance(data.get("items"), list):
+        return jsonify({"code": 400, "message": "请提供 items 数组"})
+
+    items = data["items"]
+    category_id = data.get("category_id")
+    if not category_id:
+        return jsonify({"code": 400, "message": "请选择知识分类"})
+
+    cat = KnowledgeCategory.query.get(category_id)
+    if not cat:
+        return jsonify({"code": 404, "message": "知识分类不存在"})
+
+    created = 0
+    failed = 0
+    errors = []
+
+    for idx, item in enumerate(items):
+        try:
+            title = item.get("title", f"条目{idx+1}")
+            content = item.get("content", "")
+            if not content:
+                failed += 1
+                errors.append(f"第{idx+1}条：内容不能为空")
+                continue
+
+            knowledge = Knowledge(
+                category_id=category_id,
+                title=title,
+                content=content,
+                tags=item.get("tags", ""),
+                keywords=item.get("keywords", ""),
+                is_active=item.get("is_active", True)
+            )
+            db.session.add(knowledge)
+            db.session.flush()
+            created += 1
+        except Exception as e:
+            failed += 1
+            errors.append(f"第{idx+1}条：{str(e)}")
+
+    db.session.commit()
+
+    # 批量同步向量库
+    if created > 0:
+        try:
+            processor = get_knowledge_processor()
+            batch_docs = []
+            for item in items[:created]:
+                batch_docs.append({
+                    "id": f"knowledge_batch_{idx}",
+                    "text": f"标题：{item.get('title', '')}\n内容：{item.get('content', '')}",
+                    "metadata": {"source": cat.name, "type": cat.code}
+                })
+            if batch_docs:
+                processor.vector_db.add_documents(batch_docs)
+        except Exception as e:
+            print(f"[Warning] 批量向量同步失败：{e}")
+
+    return jsonify({
+        "code": 200,
+        "message": f"批量导入完成：成功{created}条，失败{failed}条",
+        "data": {"created": created, "failed": failed, "errors": errors[:10]}
+    })
+
+
+@admin_bp.route("/knowledge/batch/export", methods=["GET"])
+@admin_required
+def batch_export_knowledge():
+    """批量导出知识条目（JSON格式）"""
+    category = request.args.get("category", "")
+    keyword = request.args.get("keyword", "")
+
+    query = Knowledge.query.filter_by(is_active=True)
+
+    if category:
+        cat = KnowledgeCategory.query.filter_by(code=category).first()
+        if cat:
+            query = query.filter_by(category_id=cat.id)
+
+    if keyword:
+        query = query.filter(
+            db.or_(
+                Knowledge.title.contains(keyword),
+                Knowledge.content.contains(keyword)
+            )
+        )
+
+    items = query.order_by(Knowledge.created_at.desc()).all()
+    return jsonify({
+        "code": 200,
+        "data": {
+            "items": [
+                {
+                    "title": k.title,
+                    "content": k.content,
+                    "tags": k.tags,
+                    "keywords": k.keywords,
+                    "source_file": k.source_file,
+                    "category": k.category.to_dict() if k.category else None
+                }
+                for k in items
+            ]
+        }
+    })
+
+
+@admin_bp.route("/knowledge/batch/delete", methods=["POST"])
+@admin_required
+def batch_delete_knowledge():
+    """批量删除知识条目"""
+    data = request.get_json()
+    if not data or not isinstance(data.get("ids"), list):
+        return jsonify({"code": 400, "message": "请提供 ids 数组"})
+
+    ids = data["ids"]
+    deleted = 0
+    for k_id in ids:
+        k = Knowledge.query.get(k_id)
+        if k:
+            KnowledgeVersion.query.filter_by(knowledge_id=k_id).delete()
+            db.session.delete(k)
+            deleted += 1
+    db.session.commit()
+    return jsonify({"code": 200, "message": f"已删除 {deleted} 条知识", "data": {"deleted": deleted}})
+
+
+@admin_bp.route("/knowledge/batch/sync", methods=["POST"])
+@admin_required
+def batch_sync_knowledge():
+    """批量同步未同步的知识到向量库"""
+    unsynced = Knowledge.query.filter_by(vector_sync=False, is_active=True).all()
+    synced = 0
+
+    try:
+        processor = get_knowledge_processor()
+        for k in unsynced:
+            processor.vector_db.add_documents([{
+                "id": f"knowledge_{k.id}",
+                "text": f"标题：{k.title}\n内容：{k.content}",
+                "metadata": {
+                    "source": k.category.name if k.category else "未知",
+                    "type": k.category.code if k.category else "unknown",
+                    "id": k.id
+                }
+            }])
+            k.vector_sync = True
+            synced += 1
+        db.session.commit()
+    except Exception as e:
+        return jsonify({"code": 500, "message": f"同步失败：{str(e)}"})
+
+    return jsonify({"code": 200, "message": f"同步完成，共{synced}条", "data": {"synced": synced}})
+
+
+@admin_bp.route("/knowledge/search", methods=["GET"])
+@admin_required
+def search_knowledge():
+    """多维度搜索知识条目"""
+    keyword = request.args.get("keyword", "")
+    category = request.args.get("category", "")
+    tags = request.args.get("tags", "")
+
+    if not keyword and not category and not tags:
+        return jsonify({"code": 400, "message": "至少提供一个搜索条件"})
+
+    query = Knowledge.query.filter_by(is_active=True)
+
+    if keyword:
+        query = query.filter(
+            db.or_(
+                Knowledge.title.contains(keyword),
+                Knowledge.content.contains(keyword),
+                Knowledge.tags.contains(keyword),
+                Knowledge.keywords.contains(keyword)
+            )
+        )
+
+    if category:
+        cat = KnowledgeCategory.query.filter_by(code=category).first()
+        if cat:
+            query = query.filter_by(category_id=cat.id)
+
+    if tags:
+        query = query.filter(Knowledge.tags.contains(tags))
+
+    results = query.order_by(Knowledge.created_at.desc()).limit(50).all()
+
+    return jsonify({
+        "code": 200,
+        "data": {
+            "total": len(results),
+            "items": [k.to_dict() for k in results]
+        }
+    })
+
+
+@admin_bp.route("/knowledge/detect", methods=["POST"])
+@admin_required
+def detect_knowledge_type():
+    """上传文件后自动检测知识类型并提取关键信息"""
+    if "file" not in request.files:
+        return jsonify({"code": 400, "message": "未上传文件"})
+
+    file = request.files["file"]
+    if not file or not file.filename:
+        return jsonify({"code": 400, "message": "文件为空"})
+
+    # 检查文件扩展名
+    allowed_extensions = {"docx", "xlsx", "txt", "pdf"}
+    ext = file.filename.rsplit(".", 1)[-1].lower()
+    if ext not in allowed_extensions:
+        return jsonify({"code": 400, "message": f"不支持的文件类型，仅支持: {', '.join(allowed_extensions)}"})
+
+    # 保存上传文件
+    knowledge_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "../knowledge")
+    knowledge_dir = os.path.abspath(knowledge_dir)
+    os.makedirs(knowledge_dir, exist_ok=True)
+
+    file_path = os.path.join(knowledge_dir, file.filename)
+    file.save(file_path)
+
+    # 提取文本
+    try:
+        processor = get_knowledge_processor()
+
+        if ext == "docx":
+            text = processor.extract_text_from_docx(file_path)
+        elif ext == "xlsx":
+            text = processor.extract_text_from_xlsx(file_path, target_spots=["灵山", "灵山胜境", "拈花湾"])
+        elif ext == "txt":
+            with open(file_path, "r", encoding="utf-8") as f:
+                text = f.read()
+        elif ext == "pdf":
+            try:
+                import fitz  # PyMuPDF
+                doc = fitz.open(file_path)
+                text = "\n".join([page.get_text() for page in doc])
+            except ImportError:
+                return jsonify({"code": 500, "message": "服务器缺少PyMuPDF库，无法解析PDF文件"})
+            except Exception as e:
+                return jsonify({"code": 500, "message": f"PDF解析失败：{str(e)}"})
+        else:
+            return jsonify({"code": 400, "message": "不支持的文件类型"})
+
+        if not text or len(text) < 10:
+            return jsonify({"code": 400, "message": "文件内容为空或过短"})
+
+        # 自动检测类型
+        detected_type = "faq"
+        suggested_category = "faq"
+
+        scene_keywords = ["景点", "讲解", "介绍", "景观", "建筑", "佛像", "大佛", "梵宫"]
+        history_keywords = ["历史", "文化", "古代", "朝代", "佛教", "传统", "习俗", "典故"]
+        info_keywords = ["门票", "交通", "停车", "开放时间", "价格", "门票价格", "游玩时间"]
+        route_keywords = ["路线", "行程", "攻略", "游览", "推荐路线", "游玩顺序"]
+
+        text_lower = text.lower()
+        scores = {
+            "faq": sum(1 for q in ["如何", "怎么", "什么", "吗", "?", "？"] if q in text_lower),
+            "scene_intro": sum(1 for kw in scene_keywords if kw in text_lower),
+            "history": sum(1 for kw in history_keywords if kw in text_lower),
+            "basic_info": sum(1 for kw in info_keywords if kw in text_lower),
+            "route": sum(1 for kw in route_keywords if kw in text_lower),
+        }
+
+        best_type = max(scores, key=scores.get)
+        detected_type = best_type
+        suggested_category = best_type
+
+        # 提取关键词（前10个高频词）
+        keywords = _extract_keywords(text, top_k=10)
+
+        # 截断预览
+        preview = text[:500] + ("..." if len(text) > 500 else "")
+
+        return jsonify({
+            "code": 200,
+            "message": "文件分析完成",
+            "data": {
+                "filename": file.filename,
+                "text_length": len(text),
+                "preview": preview,
+                "detected_type": detected_type,
+                "suggested_category": suggested_category,
+                "category_scores": scores,
+                "keywords": keywords
+            }
+        })
+    except Exception as e:
+        return jsonify({"code": 500, "message": f"文件处理失败：{str(e)}"})
+
+
+def _extract_keywords(text, top_k=10):
+    """简单的关键词提取（高频词）"""
+    # 分词
+    import re
+    words = re.findall(r'[\u4e00-\u9fff]+', text)
+    # 过滤短词
+    words = [w for w in words if len(w) >= 2]
+    # 统计词频
+    from collections import Counter
+    counter = Counter(words)
+    # 排除常见停用词
+    stopwords = {"的", "了", "是", "在", "我", "有", "和", "就", "不", "人", "都", "一",
+                 "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会", "着", "没有",
+                 "看", "好", "自己", "这", "他", "她", "它", "们", "那", "些", "什么", "怎么",
+                 "哪", "谁", "为什么", "因为", "所以", "但是", "如果", "可以", "这样", "那样",
+                 "这个", "那个", "这些", "那些", "来", "过", "做", "用", "比", "对", "给",
+                 "从", "被", "把", "让", "把", "得", "地", "还", "只", "又", "再", "很",
+                 "非常", "已经", "可能", "应该", "不会", "不能", "还是", "或者", "以及"}
+    filtered = {w: c for w, c in counter.items() if w not in stopwords}
+    return [w for w, _ in Counter(filtered).most_common(top_k)]
 
 
 # ======================== 6. 对话日志管理 ========================

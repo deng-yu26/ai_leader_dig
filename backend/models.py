@@ -1,6 +1,6 @@
 """
 ==============================================================
-数据库模型定义 —— 五张核心数据表
+数据库模型定义 —— 八张数据表
 使用 Flask-SQLAlchemy ORM 管理
 密码存储强制使用 Werkzeug 哈希加密
 ==============================================================
@@ -107,7 +107,7 @@ class ChatLog(db.Model):
         return f"<ChatLog {self.id} by user {self.user_id}>"
 
 
-# ======================== 4. FAQ知识库表 ========================
+# ======================== 4. FAQ知识库表（保留兼容） ========================
 class FaqKnowledge(db.Model):
     """FAQ知识库表 —— 存储景区常见问答对"""
     __tablename__ = "faq_knowledge"
@@ -133,7 +133,144 @@ class FaqKnowledge(db.Model):
         return f"<FaqKnowledge {self.id}: {self.question[:30]}>"
 
 
-# ======================== 5. 数字人配置表 ========================
+# ======================== 6. 知识分类表 ========================
+class KnowledgeCategory(db.Model):
+    """知识分类表 —— 管理知识内容的分类信息"""
+    __tablename__ = "knowledge_category"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(64), unique=True, nullable=False, comment="分类名称")
+    code = db.Column(db.String(32), unique=True, nullable=False, comment="分类编码")
+    description = db.Column(db.String(256), nullable=True, comment="分类描述")
+    icon = db.Column(db.String(64), default="", comment="图标类名")
+    sort_order = db.Column(db.Integer, default=0, comment="排序权重")
+    is_active = db.Column(db.Boolean, default=True, comment="是否启用")
+    created_at = db.Column(db.DateTime, default=datetime.now, comment="创建时间")
+
+    # 支持的录入字段模板
+    FIELD_TEMPLATES = {
+        "faq": ["question", "answer", "doc_source"],
+        "scene_intro": ["title", "content", "tags"],
+        "history": ["title", "period", "content", "tags"],
+        "basic_info": ["title", "content", "tags"],
+        "route": ["title", "content", "tags"],
+    }
+
+    DEFAULT_CATEGORIES = [
+        {"name": "常见问答", "code": "faq", "description": "游客常见问题的问答对", "icon": "ChatDotRound", "sort_order": 1},
+        {"name": "景点讲解词", "code": "scene_intro", "description": "各景点的详细讲解文案", "icon": "LocationInformation", "sort_order": 2},
+        {"name": "文史资料", "code": "history", "description": "景区历史文化背景资料", "icon": "Document", "sort_order": 3},
+        {"name": "基本信息", "code": "basic_info", "description": "门票、交通、开放时间等", "icon": "InfoFilled", "sort_order": 4},
+        {"name": "游览路线", "code": "route", "description": "推荐游览路线规划", "icon": "Connection", "sort_order": 5},
+    ]
+
+    @classmethod
+    def init_defaults(cls):
+        """初始化默认分类"""
+        if cls.query.count() > 0:
+            return
+        for cat in cls.DEFAULT_CATEGORIES:
+            cls.query.session.add(cls(
+                name=cat["name"],
+                code=cat["code"],
+                description=cat["description"],
+                icon=cat["icon"],
+                sort_order=cat["sort_order"]
+            ))
+        cls.query.session.commit()
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "code": self.code,
+            "description": self.description,
+            "icon": self.icon,
+            "sort_order": self.sort_order,
+            "is_active": self.is_active,
+            "field_templates": self.FIELD_TEMPLATES.get(self.code, ["title", "content"]),
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+    def __repr__(self):
+        return f"<KnowledgeCategory {self.name}>"
+
+
+# ======================== 7. 通用知识库表 ========================
+class Knowledge(db.Model):
+    """通用知识库表 —— 支持多类型知识内容管理"""
+    __tablename__ = "knowledge"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    category_id = db.Column(db.Integer, db.ForeignKey("knowledge_category.id"), nullable=False, comment="分类ID")
+    title = db.Column(db.String(256), nullable=False, comment="标题/问题")
+    content = db.Column(db.Text, nullable=False, comment="内容/答案")
+    tags = db.Column(db.String(512), default="", comment="标签（逗号分隔）")
+    source_file = db.Column(db.String(256), nullable=True, comment="来源文件路径")
+    keywords = db.Column(db.String(512), default="", comment="关键词（逗号分隔）")
+    version = db.Column(db.Integer, default=1, comment="版本号")
+    vector_sync = db.Column(db.Boolean, default=False, comment="向量库同步状态")
+    is_active = db.Column(db.Boolean, default=True, comment="是否启用")
+    sort_order = db.Column(db.Integer, default=0, comment="排序权重")
+    created_at = db.Column(db.DateTime, default=datetime.now, comment="创建时间")
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+
+    # 关联分类
+    category = db.relationship("KnowledgeCategory", backref=db.backref("knowledge_list", lazy=True))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "category_id": self.category_id,
+            "category": self.category.to_dict() if self.category else None,
+            "title": self.title,
+            "content": self.content,
+            "tags": self.tags,
+            "source_file": self.source_file,
+            "keywords": self.keywords,
+            "version": self.version,
+            "vector_sync": self.vector_sync,
+            "is_active": self.is_active,
+            "sort_order": self.sort_order,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def __repr__(self):
+        return f"<Knowledge {self.id}: {self.title[:30]}>"
+
+
+# ======================== 8. 知识版本历史表 ========================
+class KnowledgeVersion(db.Model):
+    """知识版本历史表 —— 记录知识条目的历史版本"""
+    __tablename__ = "knowledge_version"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    knowledge_id = db.Column(db.Integer, db.ForeignKey("knowledge.id", ondelete="CASCADE"), nullable=False, comment="知识条目ID")
+    version = db.Column(db.Integer, nullable=False, comment="版本号")
+    title = db.Column(db.String(256), nullable=False, comment="标题/问题")
+    content = db.Column(db.Text, nullable=False, comment="内容/答案")
+    tags = db.Column(db.String(512), default="", comment="标签")
+    keywords = db.Column(db.String(512), default="", comment="关键词")
+    created_at = db.Column(db.DateTime, default=datetime.now, comment="创建时间")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "knowledge_id": self.knowledge_id,
+            "version": self.version,
+            "title": self.title,
+            "content": self.content,
+            "tags": self.tags,
+            "keywords": self.keywords,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def __repr__(self):
+        return f"<KnowledgeVersion {self.knowledge_id} v{self.version}>"
+
+
+# ======================== 6. 数字人配置表 ========================
 class DigitalHuman(db.Model):
     """数字人配置表 —— 管理Live2D数字人形象与参数"""
     __tablename__ = "digital_human"
