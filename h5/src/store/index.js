@@ -75,7 +75,8 @@ export const useChatStore = defineStore('chat', {
     isProcessing: false, // AI是否正在回复
     currentEmotion: '平静', // 当前情绪标签
     isSpeaking: false,   // 是否正在语音播报
-    currentDhId: parseInt(localStorage.getItem('dh_id') || '1')
+    currentDhId: parseInt(localStorage.getItem('dh_id') || '1'),
+    rtcState: 'disconnected'  // LiveTalking WebRTC 连接状态
   }),
 
   actions: {
@@ -125,6 +126,11 @@ export const useChatStore = defineStore('chat', {
     // 清空对话
     clearMessages() {
       this.messages = []
+    },
+
+    // 设置 LiveTalking RTC 连接状态
+    setRtcState(state) {
+      this.rtcState = state
     }
   }
 })

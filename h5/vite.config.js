@@ -20,6 +20,11 @@ export default defineConfig({
       '/ws': {
         target: 'ws://localhost:5001',
         ws: true
+      },
+      // LiveTalking WebRTC 协商接口
+      '/offer': {
+        target: 'http://localhost:8010',
+        changeOrigin: true
       }
     }
   }

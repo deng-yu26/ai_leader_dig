@@ -117,10 +117,17 @@ export class WebSocketClient {
   }
 
   /**
+   * 设置 LiveTalking sessionid（用于 /human API 调用）
+   */
+  setLtSessionId(id) {
+    this._ltSessionId = id || ''
+  }
+
+  /**
    * 发送文本消息
    */
   sendText(text) {
-    this.send({ type: WS_TYPE.TEXT, data: text })
+    this.send({ type: WS_TYPE.TEXT, data: text, lt_sessionid: this._ltSessionId || '' })
   }
 
   /**
@@ -134,14 +141,14 @@ export class WebSocketClient {
    * 发送图片
    */
   sendImage(imageData, filename = 'image.jpg', text = '') {
-    this.send({ type: WS_TYPE.IMAGE, data: imageData, filename, text })
+    this.send({ type: WS_TYPE.IMAGE, data: imageData, filename, text, lt_sessionid: this._ltSessionId || '' })
   }
 
   /**
    * 发送打断信号
    */
   sendInterrupt() {
-    this.send({ type: WS_TYPE.INTERRUPT, data: '' })
+    this.send({ type: WS_TYPE.INTERRUPT, data: '', lt_sessionid: this._ltSessionId || '' })
   }
 
   /**

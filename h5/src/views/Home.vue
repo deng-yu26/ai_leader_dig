@@ -26,6 +26,7 @@
     <!-- Live2D 数字人显示区 -->
     <div class="live2d-container" @click="onTapCharacter">
       <Live2DViewer
+        ref="live2dRef"
         :emotion="chatStore.currentEmotion"
         :is-speaking="chatStore.isSpeaking"
         :dh-id="dhStore.currentId"
@@ -150,8 +151,10 @@ const inputText = ref('')
 const showImageUpload = ref(false)
 const isRecording = ref(false)
 const bubbleRef = ref(null)
+const live2dRef = ref(null)
 let currentAudioSource = null
-let isDiscarded = false           // 标记本次回复是否已被丢弃（暂停后忽略剩余片段）
+let isDiscarded = false
+let sessionIdTimer = null           // 标记本次回复是否已被丢弃（暂停后忽略剩余片段）
 
 // --- 响应式消息列表 ---
 const messages = computed(() => chatStore.messages)
@@ -182,9 +185,19 @@ onMounted(async () => {
   }
 
   await fetchDigitalHumans()
+
+  // 定时同步 LiveTalking sessionid → WebSocket 客户端
+  sessionIdTimer = setInterval(() => {
+    const sid = live2dRef.value?.getSessionId?.()
+    if (sid) {
+      const ws = getWsClient()
+      if (ws) ws.setLtSessionId(sid)
+    }
+  }, 500)
 })
 
 onUnmounted(() => {
+  if (sessionIdTimer) clearInterval(sessionIdTimer)
   destroyWsClient()
 })
 
@@ -275,10 +288,18 @@ function setupWsHandlers() {
   })
 
   // ---- AI音频片段：加入播放队列 ----
-  ws.on('audio_chunk', ({ audio }) => {
+  ws.on('audio_chunk', ({ audio, lt_synced }) => {
     if (isDiscarded) return
-    audioQueue.value.push(audio)
-    if (!isPlayingAudio) playNextAudio()
+    // LiveTalking 同步模式：音频由 WebRTC 视频流提供，本地跳过播放
+    if (lt_synced) {
+      chatStore.isSpeaking = true
+      return
+    }
+    // 本地 TTS 模式：加入播放队列
+    if (audio) {
+      audioQueue.value.push(audio)
+      if (!isPlayingAudio) playNextAudio()
+    }
   })
 
   // ---- 情绪推送 ----
@@ -413,6 +434,12 @@ function stopReply() {
   isPlayingAudio = false
   chatStore.setProcessing(false)
   chatStore.isSpeaking = false
+
+  // LiveTalking 3D 模式：立即静音视频（因引擎无法中断当前句）
+  live2dRef.value?.muteVideo?.()
+  setTimeout(() => {
+    live2dRef.value?.unmuteVideo?.()
+  }, 2000)
 
   if (currentAudioSource) {
     try { currentAudioSource.stop() } catch (_) {}

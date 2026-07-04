@@ -53,6 +53,10 @@ CHROMA_PERSIST_DIR = os.path.join(BASE_DIR, "chroma_db")
 CHROMA_COLLECTION_NAME = "lingshan_knowledge"
 CHROMA_TOP_K = 5  # 检索返回的最相似文档数量
 
+# ======================== LiveTalking 3D 数字人配置 ========================
+LIVETALKING_API_URL = "http://127.0.0.1:8010"      # LiveTalking 服务地址（默认端口 8010）
+LIVETALKING_ENABLED = True                           # 是否启用 3D 数字人口播
+
 # ======================== WebSocket 配置 ========================
 WS_PING_INTERVAL = 30      # ping间隔（秒）
 WS_PING_TIMEOUT = 10       # ping超时时间（秒）

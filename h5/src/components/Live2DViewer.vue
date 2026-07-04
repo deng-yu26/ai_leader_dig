@@ -1,213 +1,191 @@
 <template>
-  <!-- Live2D数字人渲染组件 -->
-  <div class="live2d-viewer" ref="viewerRef">
-    <!-- 加载状态 -->
-    <div class="loading-placeholder" v-if="!loaded">
+  <!-- 3D 数字人渲染组件（LiveTalking WebRTC） -->
+  <div class="digital-human-viewer" ref="viewerRef">
+    <!-- 连接中 -->
+    <div class="loading-placeholder" v-if="rtcState === 'connecting'">
       <div class="model-icon">🪷</div>
-      <p class="loading-text">数字人加载中...</p>
+      <p class="loading-text">3D 导游连接中...</p>
       <van-loading type="spinner" size="20" color="#c8a45c" />
     </div>
 
-    <!-- Canvas渲染区域 -->
-    <canvas ref="canvasRef" class="live2d-canvas" v-show="loaded"></canvas>
+    <!-- 连接失败 / 离线降级 -->
+    <div class="fallback-placeholder" v-else-if="rtcState === 'error' || rtcState === 'disconnected'">
+      <div class="model-icon offline">🪷</div>
+      <p class="fallback-text">3D 导游离线</p>
+      <p class="fallback-sub">语音模式可用</p>
+      <div class="retry-btn" @click="reconnect">
+        <van-icon name="replay" size="14" />
+        <span>重新连接</span>
+      </div>
+    </div>
 
-    <!-- 待机动画提示 -->
-    <div class="idle-tip" v-if="loaded && !isSpeaking && emotion === '平静'">
-      点击数字人互动
+    <!-- 3D 视频画面 -->
+    <video
+      ref="videoRef"
+      class="digital-human-video"
+      :class="{ 'video-loaded': rtcState === 'connected' }"
+      autoplay
+      playsinline
+    ></video>
+
+    <!-- 说话状态指示 -->
+    <div class="speaking-indicator" v-if="rtcState === 'connected' && isSpeaking">
+      <span class="dot"></span> 讲解中
+    </div>
+
+    <!-- 情绪标签 -->
+    <div class="emotion-tag" v-if="rtcState === 'connected' && emotion && emotion !== '平静'">
+      {{ emotion === '热情' ? '🔥' : '😊' }} {{ emotion }}
     </div>
   </div>
 </template>
 
 <script setup>
 /**
- * Live2D数字人渲染组件
- * 基于Live2D Cubism Web SDK，集成表情映射与口型驱动
+ * 3D 数字人渲染组件
  *
- * 注意：实际使用时需要将Live2D SDK文件放置在 public/live2d_models/ 目录下
- * 当前为占位实现，展示了完整的接口架构
- *
- * Live2D模型文件结构要求：
- * public/live2d_models/
- *   ├── lingyun/         # 灵韵（默认导游）
- *   │   ├── model.json
- *   │   ├── *.model3.json
- *   │   └── *.moc3
- *   ├── huixin/          # 慧心（禅意导游）
- *   └── mingyuan/        # 明远（文化导游）
+ * 通过 WebRTC 连接 LiveTalking 引擎，实时展示 3D Avatar 口播画面。
+ * LiveTalking 不可用时自动降级为静态占位 + 离线提示，
+ * 此时问答功能仍正常（语音通过本地 TTS 播放）。
  */
 import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { connectLiveTalking, RTCState } from '@/utils/rtc'
 
 const props = defineProps({
-  emotion: { type: String, default: '平静' },     // 当前情绪：平静/微笑/热情
-  isSpeaking: { type: Boolean, default: false },   // 是否正在说话
-  dhId: { type: Number, default: 1 }               // 数字人ID
+  emotion: { type: String, default: '平静' },
+  isSpeaking: { type: Boolean, default: false },
+  dhId: { type: Number, default: 1 }
 })
 
 const viewerRef = ref(null)
-const canvasRef = ref(null)
-const loaded = ref(false)
-
-// 模拟Live2D初始化（实际项目中替换为Cubism SDK初始化代码）
-let animationTimer = null
+const videoRef = ref(null)
+const rtcState = ref(RTCState.DISCONNECTED)
+const sessionId = ref('')
+let rtcConnection = null
 
 onMounted(() => {
-  // 模拟模型加载（实际项目中调用Live2D Cubism SDK初始化）
-  setTimeout(() => {
-    loaded.value = true
-    startIdleAnimation()
-  }, 1500)
-
-  // 监听窗口变化
-  window.addEventListener('resize', onResize)
+  connect()
 })
 
 onUnmounted(() => {
-  if (animationTimer) {
-    clearInterval(animationTimer)
-  }
-  window.removeEventListener('resize', onResize)
+  disconnect()
 })
 
-// 监听情绪变化 - 切换面部表情
-watch(() => props.emotion, (newEmotion) => {
-  if (loaded.value) {
-    setExpression(newEmotion)
-  }
-})
-
-// 监听说话状态 - 控制口型动画
-watch(() => props.isSpeaking, (speaking) => {
-  if (speaking) {
-    startLipSync()
-  } else {
-    stopLipSync()
-    startIdleAnimation()
-  }
-})
-
-// 监听数字人切换 - 重新加载模型
+// 监听数字人切换 → 重新连接
 watch(() => props.dhId, () => {
-  loaded.value = false
-  setTimeout(() => {
-    loaded.value = true
-    startIdleAnimation()
-  }, 1000)
+  disconnect()
+  setTimeout(() => connect(), 300)
 })
 
-// ============ Live2D控制接口（占位实现） ============
-
 /**
- * 加载Live2D模型
- * @param {string} modelPath 模型文件路径
+ * 建立 WebRTC 连接
  */
-function loadModel(modelPath) {
-  // 实际实现：Live2D Cubism SDK 模型加载
-  // const model = await Live2DModel.load(modelPath)
-  // this.model = model
-  // this.app.stage.addChild(model)
-  console.log(`[Live2D] 加载模型: ${modelPath}`)
+function connect() {
+  if (rtcConnection) disconnect()
+
+  rtcState.value = RTCState.CONNECTING
+
+  rtcConnection = connectLiveTalking({
+    onStateChange(state) {
+      rtcState.value = state
+    },
+    onStream(stream) {
+      if (videoRef.value) {
+        videoRef.value.srcObject = stream
+      }
+    },
+    onSessionId(id) {
+      sessionId.value = id
+    }
+  })
+}
+
+/** 获取当前 LiveTalking sessionid（供父组件调用） */
+function getSessionId() {
+  return sessionId.value
 }
 
 /**
- * 设置面部表情
- * @param {string} emotion 情绪标签
- *
- * 表情映射规则：
- * - 平静: 默认中性表情
- * - 微笑: 嘴角上扬，眼部微弯
- * - 热情: 大幅微笑，眼睛发亮，眉毛上扬
+ * 断开 WebRTC 连接
  */
-function setExpression(emotion) {
-  const expressionParams = {
-    '平静': { mouthOpen: 0, eyeOpen: 1, browAngle: 0 },
-    '微笑': { mouthOpen: 0.2, eyeOpen: 0.9, browAngle: 0.1 },
-    '热情': { mouthOpen: 0.4, eyeOpen: 1, browAngle: 0.3 }
+function disconnect() {
+  if (rtcConnection) {
+    rtcConnection.close()
+    rtcConnection = null
   }
-
-  const params = expressionParams[emotion] || expressionParams['平静']
-
-  // 实际实现：调用Live2D模型参数设置
-  // if (this.model) {
-  //   this.model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', params.mouthOpen)
-  //   this.model.internalModel.coreModel.setParameterValueById('ParamEyeLOpen', params.eyeOpen)
-  //   this.model.internalModel.coreModel.setParameterValueById('ParamEyeROpen', params.eyeOpen)
-  //   this.model.internalModel.coreModel.setParameterValueById('ParamBrowLY', params.browAngle)
-  //   this.model.internalModel.coreModel.setParameterValueById('ParamBrowRY', params.browAngle)
-  // }
-  console.log(`[Live2D] 设置表情: ${emotion}`, params)
+  rtcState.value = RTCState.DISCONNECTED
 }
 
 /**
- * 口型同步驱动（基于音频波形）
- * 根据音频能量值实时调整嘴部张开度
+ * 手动重连
  */
-function startLipSync() {
-  // 实际实现：使用AudioContext分析音频波形驱动口型
-  // const audioCtx = new AudioContext()
-  // const analyser = audioCtx.createAnalyser()
-  // analyser.fftSize = 256
-  // ...
-  console.log('[Live2D] 启动口型同步')
+function reconnect() {
+  disconnect()
+  setTimeout(() => connect(), 500)
 }
 
-function stopLipSync() {
-  console.log('[Live2D] 停止口型同步')
-}
-
-/**
- * 循环待机动（呼吸、轻微晃动）
- */
-function startIdleAnimation() {
-  if (animationTimer) {
-    clearInterval(animationTimer)
+/** 临时静音视频（用于中断时立即生效） */
+function muteVideo() {
+  if (videoRef.value) {
+    videoRef.value.muted = true
   }
-
-  // 模拟呼吸动画
-  let breathPhase = 0
-  animationTimer = setInterval(() => {
-    breathPhase += 0.05
-    const breath = Math.sin(breathPhase) * 0.03
-
-    // 实际实现：设置模型呼吸参数
-    // if (this.model) {
-    //   this.model.internalModel.coreModel.addParameterValueById('ParamBodyAngleX', breath)
-    //   this.model.internalModel.coreModel.addParameterValueById('ParamBodyAngleY', Math.sin(breathPhase * 0.5) * 0.02)
-    // }
-  }, 50)
 }
 
-function onResize() {
-  // 实际实现：更新canvas尺寸和模型投影矩阵
-  console.log('[Live2D] 窗口大小变化')
+/** 取消静音 */
+function unmuteVideo() {
+  if (videoRef.value) {
+    videoRef.value.muted = false
+  }
 }
+
+// 暴露给父组件
+defineExpose({ getSessionId, muteVideo, unmuteVideo })
 </script>
 
 <style scoped>
-.live2d-viewer {
+.digital-human-viewer {
   width: 100%;
   height: 100%;
   display: flex;
   justify-content: center;
   align-items: center;
   position: relative;
+  background: #1a1a2e;
+  overflow: hidden;
 }
 
-.live2d-canvas {
+/* ---- 3D 视频画面 ---- */
+.digital-human-video {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.6s ease;
 }
 
+.digital-human-video.video-loaded {
+  opacity: 1;
+}
+
+/* ---- 连接中 ---- */
 .loading-placeholder {
+  position: absolute;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
+  z-index: 2;
 }
 
 .model-icon {
   font-size: 80px;
   animation: float 2s ease-in-out infinite;
+}
+
+.model-icon.offline {
+  animation: none;
+  opacity: 0.5;
+  filter: grayscale(0.5);
 }
 
 @keyframes float {
@@ -217,19 +195,88 @@ function onResize() {
 
 .loading-text {
   font-size: 14px;
-  color: #6b7c6b;
+  color: #aab;
 }
 
-.idle-tip {
+/* ---- 离线降级 ---- */
+.fallback-placeholder {
   position: absolute;
-  bottom: 20px;
-  font-size: 12px;
-  color: #9aab9a;
-  animation: pulse 2s ease-in-out infinite;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
+.fallback-text {
+  font-size: 16px;
+  color: #999;
+  font-weight: 500;
+}
+
+.fallback-sub {
+  font-size: 12px;
+  color: #777;
+}
+
+.retry-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 6px 16px;
+  border: 1px solid #c8a45c;
+  border-radius: 20px;
+  color: #c8a45c;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.retry-btn:hover {
+  background: rgba(200, 164, 92, 0.1);
+}
+
+/* ---- 说话状态指示 ---- */
+.speaking-indicator {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  z-index: 3;
+}
+
+.speaking-indicator .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4caf50;
+  animation: pulse-dot 1s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* ---- 情绪标签 ---- */
+.emotion-tag {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 14px;
+  font-size: 12px;
+  z-index: 3;
 }
 </style>

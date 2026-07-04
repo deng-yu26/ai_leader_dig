@@ -35,6 +35,7 @@ from services.llm_service import get_llm_service
 from services.tts_service import get_tts_service
 from services.asr_service import get_asr_service
 from services.emotion_service import get_emotion_service
+from services.livetalking_service import get_livetalking_service
 
 # ======================== WebSocket消息类型定义 ========================
 # 客户端 -> 服务器
@@ -93,6 +94,7 @@ def handle_chat(ws):
     current_question = ""
     current_image_path = None
     current_image_data = None
+    lt_sessionid = ""  # LiveTalking WebRTC session id
 
     # 获取服务实例
     rag = get_knowledge_processor()
@@ -100,6 +102,7 @@ def handle_chat(ws):
     tts = get_tts_service()
     asr = get_asr_service()
     emotion = get_emotion_service()
+    lt = get_livetalking_service()  # LiveTalking 3D 数字人服务
 
     def parse_init_message(msg: dict):
         """解析客户端初始化消息"""
@@ -143,6 +146,9 @@ def handle_chat(ws):
 
         question = current_question
 
+        # 检测 LiveTalking 是否可用：可用则跳过本地 TTS，只用 WebRTC 音频（音画同步）
+        lt_available = lt.is_available()
+
         # ---- 步骤1：RAG检索 ----
         _send(ws, {"type": MSG_TYPE_STATUS, "data": "正在检索知识库..."})
         context = rag.get_knowledge_context(question)
@@ -183,11 +189,17 @@ def handle_chat(ws):
                 if is_interrupted:
                     break
                 _send(ws, {"type": MSG_TYPE_TEXT_CHUNK, "data": sentence, "index": i})
-                audio = tts.synthesize(sentence, voice=tts_voice, speed=tts_speed, pitch_value=tts_pitch)
-                if audio:
-                    full_audio.extend(audio)
-                    audio_b64 = base64.b64encode(audio).decode("utf-8")
-                    _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": audio_b64, "index": i, "text": sentence})
+                if lt_available:
+                    # LiveTalking 在线：跳过本地 TTS，由 WebRTC 流提供音画同步的音频
+                    _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": "", "index": i, "text": sentence, "lt_synced": True})
+                else:
+                    audio = tts.synthesize(sentence, voice=tts_voice, speed=tts_speed, pitch_value=tts_pitch)
+                    if audio:
+                        full_audio.extend(audio)
+                        audio_b64 = base64.b64encode(audio).decode("utf-8")
+                        _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": audio_b64, "index": i, "text": sentence})
+                # 同步推送到 LiveTalking 3D 数字人口播
+                lt.speak(sentence, lt_sessionid)
                 chunk_index += 1
         else:
             # 流式模式：逐字/逐段从LLM接收并实时推送到前端
@@ -209,17 +221,17 @@ def handle_chat(ws):
                         s = s.strip()
                         if s and len(s) >= 2:
                             _send(ws, {"type": MSG_TYPE_TEXT_CHUNK, "data": s, "index": chunk_index})
-                            # TTS合成（异步线程，避免阻塞流式推送）
-                            audio = tts.synthesize(s, voice=tts_voice, speed=tts_speed, pitch_value=tts_pitch)
-                            if audio:
-                                full_audio.extend(audio)
-                                audio_b64 = base64.b64encode(audio).decode("utf-8")
-                                _send(ws, {
-                                    "type": MSG_TYPE_AUDIO_CHUNK,
-                                    "data": audio_b64,
-                                    "index": chunk_index,
-                                    "text": s
-                                })
+                            if lt_available:
+                                # LiveTalking 在线：跳过本地 TTS
+                                _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": "", "index": chunk_index, "text": s, "lt_synced": True})
+                            else:
+                                audio = tts.synthesize(s, voice=tts_voice, speed=tts_speed, pitch_value=tts_pitch)
+                                if audio:
+                                    full_audio.extend(audio)
+                                    audio_b64 = base64.b64encode(audio).decode("utf-8")
+                                    _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": audio_b64, "index": chunk_index, "text": s})
+                            # 同步推送到 LiveTalking 3D 数字人口播
+                            lt.speak(s, lt_sessionid)
                             chunk_index += 1
                     sentence_buffer = ""
 
@@ -231,11 +243,16 @@ def handle_chat(ws):
             if sentence_buffer.strip() and not is_interrupted:
                 remaining = sentence_buffer.strip()
                 _send(ws, {"type": MSG_TYPE_TEXT_CHUNK, "data": remaining, "index": chunk_index})
-                audio = tts.synthesize(remaining, voice=tts_voice, speed=tts_speed, pitch_value=tts_pitch)
-                if audio:
-                    full_audio.extend(audio)
-                    audio_b64 = base64.b64encode(audio).decode("utf-8")
-                    _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": audio_b64, "index": chunk_index, "text": remaining})
+                if lt_available:
+                    _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": "", "index": chunk_index, "text": remaining, "lt_synced": True})
+                else:
+                    audio = tts.synthesize(remaining, voice=tts_voice, speed=tts_speed, pitch_value=tts_pitch)
+                    if audio:
+                        full_audio.extend(audio)
+                        audio_b64 = base64.b64encode(audio).decode("utf-8")
+                        _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": audio_b64, "index": chunk_index, "text": remaining})
+                # 同步推送到 LiveTalking 3D 数字人口播
+                lt.speak(remaining, lt_sessionid)
 
         if is_interrupted:
             return
@@ -282,6 +299,11 @@ def handle_chat(ws):
 
             msg_type = message.get("type")
 
+            # 更新 LiveTalking sessionid（每条消息都可能携带）
+            sid = message.get("lt_sessionid", "")
+            if sid:
+                lt_sessionid = sid
+
             # 处理心跳
             if msg_type == MSG_TYPE_HEARTBEAT:
                 _send(ws, {"type": MSG_TYPE_HEARTBEAT, "data": "pong"})
@@ -290,6 +312,7 @@ def handle_chat(ws):
             # 处理打断信号
             if msg_type == MSG_TYPE_INTERRUPT:
                 is_interrupted = True
+                lt.interrupt(lt_sessionid)  # 同步打断 LiveTalking 3D 数字人
                 _send(ws, {"type": MSG_TYPE_STATUS, "data": "已打断当前回复"})
                 continue
 
