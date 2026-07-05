@@ -23,28 +23,10 @@
       </van-button>
     </div>
 
-    <!-- Live2D 数字人显示区 -->
-    <div class="live2d-container" @click="onTapCharacter">
-      <Live2DViewer
-        ref="live2dRef"
-        :emotion="chatStore.currentEmotion"
-        :is-speaking="chatStore.isSpeaking"
-        :dh-id="dhStore.currentId"
-      />
-      <!-- 情绪标签 -->
-      <div class="emotion-badge" v-if="chatStore.currentEmotion !== '平静'">
-        {{ chatStore.currentEmotion === '热情' ? '🔥' : '😊' }}
-        {{ chatStore.currentEmotion }}
-      </div>
-      <!-- 状态提示 -->
-      <div class="status-tip" v-if="chatStore.isProcessing">
-        <van-loading type="spinner" size="16" color="#5b8c5a" />
-        <span>AI导游思考中...</span>
-      </div>
-    </div>
-
-    <!-- 对话气泡 -->
-    <div class="chat-bubbles" ref="bubbleRef">
+    <!-- 内容区：对话(左) + 数字人全身(右) -->
+    <div class="content-area">
+      <!-- 对话气泡 -->
+      <div class="chat-bubbles" ref="bubbleRef">
       <div v-if="messages.length === 0" class="chat-empty">
         <div class="empty-icon">🪷</div>
         <p class="empty-text">点击数字人开始对话<br>或输入您的问题</p>
@@ -77,6 +59,27 @@
             <van-loading type="ball" size="14" color="#5b8c5a" />
             <span>思考中...</span>
           </div>
+        </div>
+      </div>
+      </div>
+
+      <!-- Live2D 数字人显示区（右侧全身） -->
+      <div class="live2d-container" @click="onTapCharacter">
+        <Live2DViewer
+          ref="live2dRef"
+          :emotion="chatStore.currentEmotion"
+          :is-speaking="chatStore.isSpeaking"
+          :dh-id="dhStore.currentId"
+        />
+        <!-- 情绪标签 -->
+        <div class="emotion-badge" v-if="chatStore.currentEmotion !== '平静'">
+          {{ chatStore.currentEmotion === '热情' ? '🔥' : '😊' }}
+          {{ chatStore.currentEmotion }}
+        </div>
+        <!-- 状态提示 -->
+        <div class="status-tip" v-if="chatStore.isProcessing">
+          <van-loading type="spinner" size="16" color="#5b8c5a" />
+          <span>AI导游思考中...</span>
         </div>
       </div>
     </div>
@@ -665,41 +668,55 @@ function scrollToBottom() {
   padding: 0 10px !important;
 }
 
+.content-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
 .live2d-container {
-  flex: 0 0 240px;
+  width: 38%;
+  min-width: 130px;
+  height: 100%;
   position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
-  background: radial-gradient(ellipse at center, rgba(255,255,255,0.8) 0%, transparent 70%);
+  background: #1a1a2e;
   overflow: hidden;
+  border-left: 2px solid rgba(91,140,90,0.15);
+  flex-shrink: 0;
 }
 
 .emotion-badge {
   position: absolute;
-  top: 12px;
-  right: 16px;
-  background: rgba(255,255,255,0.9);
-  padding: 4px 12px;
+  top: 8px;
+  right: 8px;
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  padding: 3px 10px;
   border-radius: 20px;
-  font-size: 12px;
-  color: #5b8c5a;
-  box-shadow: var(--shadow-sm);
+  font-size: 11px;
+  z-index: 5;
 }
 
 .status-tip {
   position: absolute;
-  bottom: 12px;
+  bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: rgba(255,255,255,0.9);
-  padding: 6px 16px;
+  gap: 4px;
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  padding: 4px 10px;
   border-radius: 20px;
-  font-size: 12px;
-  color: #5b8c5a;
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 5;
 }
 
 .chat-bubbles {
