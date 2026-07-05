@@ -23,47 +23,44 @@
       </van-button>
     </div>
 
-    <!-- 内容区：对话(左) + 数字人全身(右) -->
+    <!-- 内容区：对话(左) + 数字人全身(右下角) -->
     <div class="content-area">
       <!-- 对话气泡 -->
       <div class="chat-bubbles" ref="bubbleRef">
-      <div v-if="messages.length === 0" class="chat-empty">
-        <div class="empty-icon">🪷</div>
-        <p class="empty-text">点击数字人开始对话<br>或输入您的问题</p>
-      </div>
-
-      <div
-        v-for="(msg, i) in messages"
-        :key="`${msg.id}-${i}`"
-        :class="['bubble', msg.role === 'user' ? 'user-bubble' : 'ai-bubble']"
-      >
-        <div class="bubble-avatar">
-          {{ msg.role === 'user' ? '👤' : '🪷' }}
+        <div v-if="messages.length === 0" class="chat-empty">
+          <div class="empty-icon">🪷</div>
+          <p class="empty-text">点击数字人开始对话<br>或输入您的问题</p>
         </div>
-        <div class="bubble-content">
-          <div class="bubble-text">{{ msg.text }}</div>
-          <div class="bubble-meta">
-            <span class="bubble-time">{{ msg.time }}</span>
-            <span class="bubble-emotion" v-if="msg.emotion && msg.emotion !== '平静'">
-              {{ msg.emotion === '热情' ? '🔥' : '😊' }} {{ msg.emotion }}
-            </span>
+
+        <div
+          v-for="(msg, i) in messages"
+          :key="`${msg.id}-${i}`"
+          :class="['bubble', msg.role === 'user' ? 'user-bubble' : 'ai-bubble']"
+        >
+          <div class="bubble-avatar" v-if="msg.role === 'user'">👤</div>
+          <div class="bubble-content">
+            <div class="bubble-text">{{ msg.text }}</div>
+            <div class="bubble-meta">
+              <span class="bubble-time">{{ msg.time }}</span>
+              <span class="bubble-emotion" v-if="msg.emotion && msg.emotion !== '平静'">
+                {{ msg.emotion === '热情' ? '🔥' : '😊' }} {{ msg.emotion }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI思考中加载占位 -->
+        <div class="bubble ai-bubble" v-if="chatStore.isProcessing && !hasLastAiMsg">
+          <div class="bubble-content">
+            <div class="bubble-text thinking">
+              <van-loading type="ball" size="14" color="#5b8c5a" />
+              <span>思考中...</span>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- AI思考中加载占位 -->
-      <div class="bubble ai-bubble" v-if="chatStore.isProcessing && !hasLastAiMsg">
-        <div class="bubble-avatar">🪷</div>
-        <div class="bubble-content">
-          <div class="bubble-text thinking">
-            <van-loading type="ball" size="14" color="#5b8c5a" />
-            <span>思考中...</span>
-          </div>
-        </div>
-      </div>
-      </div>
-
-      <!-- Live2D 数字人显示区（右侧全身） -->
+      <!-- 数字人全身（绝对定位右下角，融入对话区） -->
       <div class="live2d-container" @click="onTapCharacter">
         <Live2DViewer
           ref="live2dRef"
@@ -78,8 +75,8 @@
         </div>
         <!-- 状态提示 -->
         <div class="status-tip" v-if="chatStore.isProcessing">
-          <van-loading type="spinner" size="16" color="#5b8c5a" />
-          <span>AI导游思考中...</span>
+          <van-loading type="spinner" size="14" color="#5b8c5a" />
+          <span>思考中...</span>
         </div>
       </div>
     </div>
@@ -671,23 +668,26 @@ function scrollToBottom() {
 .content-area {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: row;
+  position: relative;
   overflow: hidden;
+  /* 统一背景：与页面底部渐变衔接 */
+  background: linear-gradient(180deg, #e8f5e9 0%, #dce8dc 40%, #cfdbcf 100%);
 }
 
 .live2d-container {
-  width: 38%;
-  min-width: 130px;
-  height: 100%;
-  position: relative;
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 40%;
+  max-width: 200px;
+  height: 85%;
   display: flex;
   justify-content: center;
-  align-items: center;
-  background: #1a1a2e;
-  overflow: hidden;
-  border-left: 2px solid rgba(91,140,90,0.15);
-  flex-shrink: 0;
+  align-items: flex-end;
+  background: transparent;
+  overflow: visible;
+  pointer-events: auto;
+  z-index: 2;
 }
 
 .emotion-badge {
@@ -724,7 +724,10 @@ function scrollToBottom() {
   min-height: 0;
   overflow-y: auto;
   padding: 12px 16px;
+  padding-left: 38%;
   -webkit-overflow-scrolling: touch;
+  position: relative;
+  z-index: 1;
 }
 
 .chat-empty {

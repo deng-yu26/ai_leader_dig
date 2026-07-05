@@ -156,7 +156,7 @@ defineExpose({ getSessionId, muteVideo, unmuteVideo })
   justify-content: center;
   align-items: center;
   position: relative;
-  background: #1a1a2e;
+  background: transparent;
   overflow: hidden;
 }
 
@@ -201,7 +201,7 @@ defineExpose({ getSessionId, muteVideo, unmuteVideo })
 
 .loading-text {
   font-size: 14px;
-  color: #aab;
+  color: #8a9a8a;
 }
 
 /* ---- 离线降级 ---- */
@@ -216,13 +216,13 @@ defineExpose({ getSessionId, muteVideo, unmuteVideo })
 
 .fallback-text {
   font-size: 16px;
-  color: #999;
+  color: #6b7c6b;
   font-weight: 500;
 }
 
 .fallback-sub {
   font-size: 12px;
-  color: #777;
+  color: #9aab9a;
 }
 
 .retry-btn {
