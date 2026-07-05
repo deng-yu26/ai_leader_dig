@@ -86,14 +86,26 @@
       <div class="input-wrapper">
         <!-- 图片上传按钮 -->
         <van-icon name="photo-o" size="22" color="#5b8c5a" @click="showImageUpload = true" />
-        <!-- 文本输入 -->
+        <!-- 文本输入 / 语音模式按住说话 -->
         <input
+          v-if="!voiceMode"
           v-model="inputText"
           class="text-input"
           placeholder="输入问题..."
           @keydown.enter="sendText"
         />
-        <!-- 终止/语音按钮互斥：说话时显示终止，空闲时显示语音 -->
+        <div
+          v-else
+          :class="['hold-to-speak', { recording: isRecording }]"
+          @mousedown.prevent="startHoldSpeak"
+          @mouseup.prevent="stopHoldSpeak"
+          @mouseleave.prevent="stopHoldSpeak"
+          @touchstart.prevent="startHoldSpeak"
+          @touchend.prevent="stopHoldSpeak"
+        >
+          {{ isRecording ? '🎙️ 正在聆听...' : '🎙️ 请按住说话' }}
+        </div>
+        <!-- 终止/语音按钮 -->
         <van-icon
           v-if="chatStore.isProcessing || chatStore.isSpeaking"
           name="stop-circle-o"
@@ -102,11 +114,18 @@
           @click="stopReply"
         />
         <van-icon
-          v-else
-          :name="isRecording ? 'phone-circle-o' : 'phone-o'"
-          :color="isRecording ? '#e74c3c' : '#5b8c5a'"
+          v-else-if="voiceMode"
+          name="close"
+          color="#999"
           size="22"
-          @click="toggleVoiceInput"
+          @click="exitVoiceMode"
+        />
+        <van-icon
+          v-else
+          name="phone-o"
+          color="#5b8c5a"
+          size="22"
+          @click="enterVoiceMode"
         />
         <!-- 发送按钮 -->
         <van-icon
@@ -149,6 +168,7 @@ const userStore = useUserStore()
 const inputText = ref('')
 const showImageUpload = ref(false)
 const isRecording = ref(false)
+const voiceMode = ref(false)       // 语音输入模式（输入框变成"按住说话"）
 const bubbleRef = ref(null)
 const live2dRef = ref(null)
 let currentAudioSource = null
@@ -345,7 +365,7 @@ function sendText() {
   const text = inputText.value.trim()
   if (!text) return
 
-  if (isRecording.value) stopVoiceInput()
+  if (voiceMode.value) exitVoiceMode()
 
   inputText.value = ''
   chatStore.addUserMessage(text, 'text')
@@ -391,30 +411,49 @@ function fallbackReply() {
   }, 1000)
 }
 
-// ===== 语音输入 =====
-function toggleVoiceInput() {
-  isRecording.value ? stopVoiceInput() : startVoiceInput()
+// ===== 语音输入（按住说话模式） =====
+let mediaRecorder = null
+let audioChunks = []
+let holdStartTime = 0
+
+function enterVoiceMode() {
+  voiceMode.value = true
 }
 
-function startVoiceInput() {
+function exitVoiceMode() {
+  voiceMode.value = false
+  if (isRecording.value) {
+    stopHoldSpeak()
+  }
+}
+
+function startHoldSpeak() {
   if (!navigator.mediaDevices?.getUserMedia) {
     showFailToast('当前设备不支持语音输入')
     return
   }
 
   isRecording.value = true
-  showLoadingToast({ message: '录音中...点击语音按钮停止', duration: 0, forbidClick: true })
+  audioChunks = []
+  holdStartTime = Date.now()
 
   navigator.mediaDevices.getUserMedia({ audio: true })
     .then(stream => {
-      const mediaRecorder = new MediaRecorder(stream)
-      const audioChunks = []
-
+      mediaRecorder = new MediaRecorder(stream)
       mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data)
 
       mediaRecorder.onstop = () => {
-        closeToast()
+        const duration = (Date.now() - holdStartTime) / 1000
         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' })
+
+        // 静音检测：时长太短或数据量太小 → 未检测到声音
+        if (duration < 0.5 || audioBlob.size < 2000) {
+          showFailToast('未检测到声音，请重试')
+          isRecording.value = false
+          stream.getTracks().forEach(track => track.stop())
+          return
+        }
+
         const reader = new FileReader()
         reader.onload = () => {
           const base64 = reader.result.split(',')[1]
@@ -423,16 +462,12 @@ function startVoiceInput() {
         }
         reader.readAsDataURL(audioBlob)
         stream.getTracks().forEach(track => track.stop())
+        isRecording.value = false
+        // 发送完成后退出语音模式，回到文本输入
+        voiceMode.value = false
       }
 
       mediaRecorder.start()
-
-      setTimeout(() => {
-        if (mediaRecorder.state === 'recording') {
-          mediaRecorder.stop()
-          isRecording.value = false
-        }
-      }, 3000)
     })
     .catch(() => {
       showFailToast('麦克风访问被拒绝')
@@ -440,9 +475,10 @@ function startVoiceInput() {
     })
 }
 
-function stopVoiceInput() {
-  isRecording.value = false
-  closeToast()
+function stopHoldSpeak() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop()
+  }
 }
 
 function stopReply() {
@@ -818,6 +854,27 @@ function scrollToBottom() {
 
 .text-input::placeholder {
   color: #9aab9a;
+}
+
+.hold-to-speak {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #5b8c5a, #7cb342);
+  color: #fff;
+  border-radius: 20px;
+  font-size: 15px;
+  font-weight: 500;
+  padding: 8px 0;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+.hold-to-speak.recording {
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  transform: scale(0.97);
 }
 
 .send-btn {
