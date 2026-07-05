@@ -162,7 +162,7 @@ def handle_chat(ws):
         system_prompt = """你是一个专业的灵山胜境景区AI导游。你的职责是回答关于灵山胜境景区（含拈花湾禅意小镇）的所有问题。
 
 ## 回答规则（严格遵守）：
-1. 你只能回答与灵山胜境景区、拈花湾禅意小镇相关的内容。
+1. 你只能回答与灵山胜境景区、拈花湾禅意小镇相关的内容，简短点。
 2. 如果用户问的问题与景区无关，请友好地引导用户询问景区相关问题。
 3. 回答内容要热情、生动、有感染力，适合导游讲解风格。
 4. 基于提供的知识库上下文进行回答，不要编造事实。
@@ -177,6 +177,9 @@ def handle_chat(ws):
         # ---- 步骤3：流式LLM生成 + 实时推送 ----
         _send(ws, {"type": MSG_TYPE_STATUS, "data": "AI导游正在思考..."})
         _send(ws, {"type": MSG_TYPE_TEXT_START, "data": ""})
+        # 触发"思考"动作（audiotype=3）
+        if lt_available:
+            lt.set_audiotype(3, lt_sessionid)
 
         full_answer = ""
         text_buffer = ""       # 累积流式文本

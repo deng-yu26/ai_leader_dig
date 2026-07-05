@@ -94,7 +94,7 @@
         <!-- 按钮直接放 body 里确保一定显示 -->
         <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:8px;padding-top:12px;border-top:1px solid #eee">
           <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="handleSave">确认保存</el-button>
+          <el-button :loading="saving" @click="handleSave">确认保存</el-button>
         </div>
       </el-form>
     </el-dialog>
