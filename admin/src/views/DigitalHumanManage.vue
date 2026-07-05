@@ -61,9 +61,21 @@
         </el-form-item>
         <el-form-item label="Avatar文件夹" prop="model_path">
           <div style="display:flex;flex-direction:column;gap:4px">
-            <el-input v-model="form.model_path" placeholder="例如: 1, wav2lip256_avatar1" />
+            <el-select v-model="form.model_path" placeholder="选择已生成的 Avatar..." filterable allow-create>
+              <el-option
+                v-for="a in avatarsOnDisk"
+                :key="a.folder"
+                :label="a.folder"
+                :value="a.folder"
+              >
+                <span>{{ a.folder }}</span>
+                <span style="float:right;font-size:11px;color:#909399;margin-left:8px">
+                  {{ a.has_coords ? '✅' : '' }}
+                </span>
+              </el-option>
+            </el-select>
             <span style="font-size:11px;color:#909399">
-              对应 LiveTalking 中 data/avatars/ 下的文件夹名，如 <b>1</b>、<b>wav2lip256_avatar1</b>
+              自动扫描 LiveTalking <b>data/avatars/</b> 目录，也可手动输入新名称
             </span>
           </div>
         </el-form-item>
@@ -96,7 +108,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getAdminDigitalHumans, createDigitalHuman, updateDigitalHuman, deleteDigitalHuman } from '@/utils/api'
+import { getAdminDigitalHumans, createDigitalHuman, updateDigitalHuman, deleteDigitalHuman, listAvatarsOnDisk } from '@/utils/api'
 
 const humans = ref([])
 const loading = ref(false)
@@ -104,6 +116,7 @@ const saving = ref(false)
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const editId = ref(null)
+const avatarsOnDisk = ref([])  // LiveTalking data/avatars/ 中已生成的 avatar 列表
 
 const form = ref({
   name: '',
@@ -114,7 +127,21 @@ const form = ref({
   is_active: true
 })
 
-onMounted(() => fetchHumans())
+onMounted(() => {
+  fetchHumans()
+  fetchAvatarsOnDisk()
+})
+
+async function fetchAvatarsOnDisk() {
+  try {
+    const res = await listAvatarsOnDisk()
+    if (res.code === 200) {
+      avatarsOnDisk.value = res.data
+    }
+  } catch (e) {
+    console.warn('获取 avatar 目录失败:', e)
+  }
+}
 
 async function fetchHumans() {
   loading.value = true

@@ -602,8 +602,8 @@ function goDigitalHuman() {
 // ===== 获取数字人列表 =====
 async function fetchDigitalHumans() {
   try {
-    const { default: api } = await import('@/utils/api')
-    const res = await api.getDigitalHumans()
+    const { getDigitalHumans } = await import('@/utils/api')
+    const res = await getDigitalHumans()
     if (res.code === 200) dhStore.setHumans(res.data)
   } catch (e) {
     console.warn('获取数字人列表失败:', e)

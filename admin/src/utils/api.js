@@ -51,6 +51,7 @@ export const getAdminDigitalHumans = () => api.get('/admin/digital-humans')
 export const createDigitalHuman = (data) => api.post('/admin/digital-humans', data)
 export const updateDigitalHuman = (id, data) => api.put(`/admin/digital-humans/${id}`, data)
 export const deleteDigitalHuman = (id) => api.delete(`/admin/digital-humans/${id}`)
+export const listAvatarsOnDisk = () => api.get('/admin/digital-humans/avatars-on-disk')
 
 // ===== 对话日志 =====
 export const getChatLogs = (params) => api.get('/admin/chat-logs', { params })

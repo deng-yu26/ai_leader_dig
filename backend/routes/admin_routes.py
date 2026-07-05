@@ -231,6 +231,36 @@ def delete_digital_human(dh_id):
     return jsonify({"code": 200, "message": "删除成功"})
 
 
+# ======================== 4b. 扫描 LiveTalking 已生成的 Avatar ========================
+@admin_bp.route("/digital-humans/avatars-on-disk", methods=["GET"])
+@admin_required
+def list_avatars_on_disk():
+    """扫描 LiveTalking data/avatars/ 目录，返回所有可用的 avatar 文件夹"""
+    import os
+    avatars_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        'LiveTalking', 'data', 'avatars'
+    )
+    result = []
+    if os.path.isdir(avatars_dir):
+        for name in sorted(os.listdir(avatars_dir)):
+            full = os.path.join(avatars_dir, name)
+            if not os.path.isdir(full):
+                continue
+            # 检查是否是有效 avatar（有 coords.pkl 或 latents.pt）
+            has_coords = os.path.isfile(os.path.join(full, 'coords.pkl'))
+            has_latents = os.path.isfile(os.path.join(full, 'latents.pt'))
+            has_imgs = os.path.isdir(os.path.join(full, 'full_imgs'))
+            if has_coords or has_latents or has_imgs:
+                result.append({
+                    'folder': name,
+                    'has_coords': has_coords,
+                    'has_latents': has_latents,
+                    'has_imgs': has_imgs,
+                })
+    return jsonify({"code": 200, "data": result})
+
+
 # ======================== 5. 知识库管理 ========================
 @admin_bp.route("/knowledge", methods=["GET"])
 @admin_required

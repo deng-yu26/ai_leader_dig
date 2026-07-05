@@ -126,16 +126,16 @@ if __name__ == "__main__":
             db.session.add(admin)
             print(f"[✓] 默认管理员已创建：{DEFAULT_ADMIN_USERNAME}/{DEFAULT_ADMIN_PASSWORD}")
 
-        # 初始化默认数字人
+        # 初始化默认数字人（model_path = LiveTalking data/avatars/ 下的文件夹名）
         if DigitalHuman.query.count() == 0:
             default_dh = [
-                DigitalHuman(name="灵韵（默认导游）", model_path="/live2d_models/lingyun/", is_active=True),
-                DigitalHuman(name="慧心（禅意导游）", model_path="/live2d_models/huixin/", default_speed=0.9, default_pitch=1.1, default_voice="zh-CN-XiaoyiNeural", is_active=True),
-                DigitalHuman(name="明远（文化导游）", model_path="/live2d_models/mingyuan/", default_speed=1.1, default_pitch=0.9, default_voice="zh-CN-YunxiNeural", is_active=True),
+                DigitalHuman(name="灵韵（默认导游）", model_path="wav2lip256_avatar1", is_active=True),
+                DigitalHuman(name="慧心（禅意导游）", model_path="wav2lip256_avatar1", default_speed=0.9, default_pitch=1.1, default_voice="zh-CN-XiaoyiNeural", is_active=True),
+                DigitalHuman(name="明远（文化导游）", model_path="wav2lip256_avatar1", default_speed=1.1, default_pitch=0.9, default_voice="zh-CN-YunxiNeural", is_active=True),
             ]
             for dh in default_dh:
                 db.session.add(dh)
-            print(f"[✓] 默认数字人已创建")
+            print(f"[✓] 默认数字人已创建（请在管理后台更新 Avatar文件夹 为你实际的 avatar 目录名）")
 
         db.session.commit()
 
