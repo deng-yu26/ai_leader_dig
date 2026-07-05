@@ -237,10 +237,8 @@ def delete_digital_human(dh_id):
 def list_avatars_on_disk():
     """扫描 LiveTalking data/avatars/ 目录，返回所有可用的 avatar 文件夹"""
     import os
-    avatars_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        'LiveTalking', 'data', 'avatars'
-    )
+    from config import LIVETALKING_AVATARS_DIR
+    avatars_dir = LIVETALKING_AVATARS_DIR
     result = []
     if os.path.isdir(avatars_dir):
         for name in sorted(os.listdir(avatars_dir)):

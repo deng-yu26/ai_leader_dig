@@ -56,7 +56,7 @@ def init_database():
         default_humans = [
             {
                 "name": "灵韵（默认导游）",
-                "model_path": "/live2d_models/lingyun/",
+                "model_path": "wav2lip256_avatar1",
                 "default_speed": 1.0,
                 "default_pitch": 1.0,
                 "default_voice": "zh-CN-XiaoxiaoNeural",
@@ -64,7 +64,7 @@ def init_database():
             },
             {
                 "name": "慧心（禅意导游）",
-                "model_path": "/live2d_models/huixin/",
+                "model_path": "wav2lip256_avatar1",
                 "default_speed": 0.9,
                 "default_pitch": 1.1,
                 "default_voice": "zh-CN-XiaoyiNeural",
@@ -72,7 +72,7 @@ def init_database():
             },
             {
                 "name": "明远（文化导游）",
-                "model_path": "/live2d_models/mingyuan/",
+                "model_path": "wav2lip256_avatar1",
                 "default_speed": 1.1,
                 "default_pitch": 0.9,
                 "default_voice": "zh-CN-YunxiNeural",
