@@ -153,6 +153,7 @@ const bubbleRef = ref(null)
 const live2dRef = ref(null)
 let currentAudioSource = null
 let isDiscarded = false
+let doneTimeoutId = null           // 旧 done 延迟定时器，新回复开始时清除
 let sessionIdTimer = null           // 标记本次回复是否已被丢弃（暂停后忽略剩余片段）
 
 // --- 响应式消息列表 ---
@@ -265,6 +266,11 @@ function setupWsHandlers() {
   // ---- AI开始生成：清空音频队列，预创建新AI消息 ----
   ws.on('text_start', () => {
     isDiscarded = false
+    // 取消旧的 done 定时器，防止旧回复覆盖新回复的 isSpeaking 状态
+    if (doneTimeoutId) {
+      clearTimeout(doneTimeoutId)
+      doneTimeoutId = null
+    }
     chatStore.setProcessing(true)
     chatStore.setEmotion('平静')
     audioQueue.value = []
@@ -324,7 +330,12 @@ function setupWsHandlers() {
     if (isDiscarded) return
     chatStore.setProcessing(false)
     if (audioQueue.value.length === 0) {
-      setTimeout(() => { chatStore.isSpeaking = false }, 1000)
+      // 使用可取消的定时器，防止旧 done 在新回复开始后覆盖 isSpeaking
+      if (doneTimeoutId) clearTimeout(doneTimeoutId)
+      doneTimeoutId = setTimeout(() => {
+        chatStore.isSpeaking = false
+        doneTimeoutId = null
+      }, 1000)
     }
   })
 }
@@ -340,16 +351,28 @@ function sendText() {
   chatStore.addUserMessage(text, 'text')
   scrollToBottom()
 
-  if (chatStore.isProcessing) {
+  // 数字人正在思考 OR 正在朗读 → 打断后发送新问题
+  if (chatStore.isProcessing || chatStore.isSpeaking) {
     const ws = getWsClient()
     if (ws && ws.isConnected.value) {
       ws.sendInterrupt()
+      // 丢弃旧回复的所有后续消息
+      isDiscarded = true
+      audioQueue.value = []
+      isPlayingAudio = false
+      if (currentAudioSource) {
+        try { currentAudioSource.stop() } catch (_) {}
+        currentAudioSource = null
+      }
       chatStore.setProcessing(false)
+      chatStore.isSpeaking = false
+      closeToast()
+      // 稍等打断生效 + LiveTalking 管线清空，再发新问题
       setTimeout(() => {
         const ws2 = getWsClient()
         if (ws2 && ws2.isConnected.value) ws2.sendText(text)
         else fallbackReply()
-      }, 100)
+      }, 300)
     } else {
       fallbackReply()
     }
@@ -441,6 +464,11 @@ function stopReply() {
 
   // 丢弃当前回复所有后续消息片段
   isDiscarded = true
+  // 取消旧 done 定时器，防止其覆盖新回复的 isSpeaking
+  if (doneTimeoutId) {
+    clearTimeout(doneTimeoutId)
+    doneTimeoutId = null
+  }
 
   audioQueue.value = []
   isPlayingAudio = false

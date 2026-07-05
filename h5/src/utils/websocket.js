@@ -204,7 +204,12 @@ export class WebSocketClient {
         this._emit('text_end', data)
         break
       case WS_TYPE.AUDIO_CHUNK:
-        this._emit('audio_chunk', { audio: data, index, text })
+        this._emit('audio_chunk', {
+          audio: data,
+          index,
+          text,
+          lt_synced: message.lt_synced || false
+        })
         break
       case WS_TYPE.AUDIO_END:
         this._emit('audio_end', data)
