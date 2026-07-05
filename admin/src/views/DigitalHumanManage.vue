@@ -54,7 +54,7 @@
     </el-card>
 
     <!-- 编辑对话框 -->
-    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑数字人' : '添加数字人'" width="500px">
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑数字人' : '添加数字人'" width="480" :close-on-click-modal="false" destroy-on-close>
       <el-form ref="formRef" :model="form" label-width="100px">
         <el-form-item label="数字人名称" prop="name" :rules="[{ required: true, message: '请输入名称' }]">
           <el-input v-model="form.name" />

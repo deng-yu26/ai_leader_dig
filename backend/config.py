@@ -57,11 +57,13 @@ CHROMA_TOP_K = 5  # 检索返回的最相似文档数量
 LIVETALKING_API_URL = "http://127.0.0.1:8010"      # LiveTalking 服务地址（默认端口 8010）
 LIVETALKING_ENABLED = True                           # 是否启用 3D 数字人口播
 # LiveTalking 的 data/avatars/ 目录（自动扫描已生成的数字人形象）
-# 默认：与 ai_leader_dig 同级目录下的 LiveTalking/data/avatars/
+# 如果自动推算不对，直接改成绝对路径，例如 r"C:\Users\Administrator\Downloads\LiveTalking\data\avatars"
 LIVETALKING_AVATARS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(BASE_DIR)),  # 到 livetalking/
     "LiveTalking", "data", "avatars"
 )
+# 覆盖自动推算：取消下面注释并填入你的实际路径
+# LIVETALKING_AVATARS_DIR = r"D:\codeProject\livetalking\LiveTalking\data\avatars"
 
 # ======================== WebSocket 配置 ========================
 WS_PING_INTERVAL = 30      # ping间隔（秒）
