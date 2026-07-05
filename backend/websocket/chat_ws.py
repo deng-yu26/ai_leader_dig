@@ -18,6 +18,7 @@ import sys
 import json
 import re
 import threading
+import time
 import base64
 import tempfile
 from typing import Optional
@@ -58,6 +59,10 @@ MSG_TYPE_STATUS = "status"              # 状态消息
 MSG_TYPE_ERROR = "error"                # 错误消息
 MSG_TYPE_DONE = "done"                  # 整个对话完成
 
+
+# 全局待处理列表：[(interrupt_flag, ws, full_answer, lt_sessionid, lt), ...]
+# 用于在 lt_synced 模式下等待 LiveTalking 说完再发 done
+_pending_lt_waits = []
 
 def _send(ws, message: dict):
     """发送JSON消息到客户端（同步）"""
@@ -264,9 +269,48 @@ def handle_chat(ws):
         emotion_label = emotion.get_emotion_label(full_answer)
         _send(ws, {"type": MSG_TYPE_EMOTION, "data": emotion_label})
 
+        # 文本生成已完成，先发 text_end（关闭前端"思考中"状态）
         _send(ws, {"type": MSG_TYPE_TEXT_END, "data": full_answer})
-        _send(ws, {"type": MSG_TYPE_AUDIO_END, "data": ""})
-        _send(ws, {"type": MSG_TYPE_DONE, "data": ""})
+
+        if lt_available:
+            # LiveTalking 模式：数字人还在朗读，后台等待说完再发 done
+            # 这样前端打断按钮会保持可见（isSpeaking=true）
+            interrupt_flag = {'interrupted': False}
+            _pending_lt_waits.append((interrupt_flag, ws, full_answer, lt_sessionid, lt))
+
+            def _wait_lt_finish():
+                waited = 0.0
+                while waited < 30.0:  # 最长等 30 秒
+                    if interrupt_flag['interrupted']:
+                        return
+                    time.sleep(0.3)
+                    waited += 0.3
+                    try:
+                        if not lt.is_speaking(lt_sessionid):
+                            print(f"[LiveTalking] 说话结束，等待了 {waited:.1f}s")
+                            break
+                    except Exception:
+                        pass
+                if not interrupt_flag['interrupted']:
+                    try:
+                        _send(ws, {"type": MSG_TYPE_AUDIO_END, "data": ""})
+                        _send(ws, {"type": MSG_TYPE_DONE, "data": ""})
+                    except Exception:
+                        pass
+                # 清理
+                try:
+                    _pending_lt_waits.remove(
+                        (interrupt_flag, ws, full_answer, lt_sessionid, lt)
+                    )
+                except ValueError:
+                    pass
+
+            t = threading.Thread(target=_wait_lt_finish, daemon=True)
+            t.start()
+        else:
+            # 本地 TTS 模式：立即发送完成信号（原有行为）
+            _send(ws, {"type": MSG_TYPE_AUDIO_END, "data": ""})
+            _send(ws, {"type": MSG_TYPE_DONE, "data": ""})
 
         # ---- 步骤7：保存对话日志 ----
         try:
@@ -313,6 +357,14 @@ def handle_chat(ws):
             if msg_type == MSG_TYPE_INTERRUPT:
                 is_interrupted = True
                 lt.interrupt(lt_sessionid)  # 同步打断 LiveTalking 3D 数字人
+                # 清理所有等待中的 LiveTalking 完成检查
+                for flag, wait_ws, _, _, _ in list(_pending_lt_waits):
+                    flag['interrupted'] = True
+                    try:
+                        _send(wait_ws, {"type": MSG_TYPE_DONE, "data": ""})
+                    except Exception:
+                        pass
+                _pending_lt_waits.clear()
                 _send(ws, {"type": MSG_TYPE_STATUS, "data": "已打断当前回复"})
                 continue
 

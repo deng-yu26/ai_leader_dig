@@ -102,6 +102,25 @@ class LiveTalkingService:
         except Exception as e:
             print(f"[LiveTalking] 打断失败：{e}")
 
+    def is_speaking(self, sessionid: str = "") -> bool:
+        """查询 LiveTalking 是否正在说话"""
+        if not self._check_available():
+            return False
+        try:
+            url = f"{self.api_url}/is_speaking"
+            resp = self._session.post(
+                url,
+                json={"sessionid": sessionid or ""},
+                timeout=3
+            )
+            if resp.status_code == 200:
+                result = resp.json()
+                if result.get("code") == 0:
+                    return result.get("data", False)
+        except Exception as e:
+            print(f"[LiveTalking] 查询说话状态失败：{e}")
+        return False
+
 
 # ======================== 全局单例 ========================
 _livetalking_service = None

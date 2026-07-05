@@ -93,7 +93,7 @@
           placeholder="输入问题..."
           @keydown.enter="sendText"
         />
-        <!-- 终止按钮 -->
+        <!-- 终止按钮（说话时显示） -->
         <van-icon
           v-if="chatStore.isProcessing || chatStore.isSpeaking"
           name="stop-circle-o"
@@ -101,13 +101,12 @@
           size="22"
           @click="stopReply"
         />
-        <!-- 语音按钮 -->
+        <!-- 语音按钮（始终显示，说话中点击=打断+语音输入） -->
         <van-icon
-          v-else
           :name="isRecording ? 'phone-circle-o' : 'phone-o'"
           :color="isRecording ? '#e74c3c' : '#5b8c5a'"
           size="22"
-          @click="toggleVoiceInput"
+          @click="handleVoiceClick"
         />
         <!-- 发送按钮 -->
         <van-icon
@@ -370,8 +369,21 @@ function fallbackReply() {
 }
 
 // ===== 语音输入 =====
-function toggleVoiceInput() {
-  isRecording.value ? stopVoiceInput() : startVoiceInput()
+function handleVoiceClick() {
+  // 如果正在录音，则停止
+  if (isRecording.value) {
+    stopVoiceInput()
+    return
+  }
+  // 如果数字人正在说话/生成，先打断再开始录音
+  if (chatStore.isProcessing || chatStore.isSpeaking) {
+    stopReply()
+    // 稍等打断生效后再开始录音
+    setTimeout(() => startVoiceInput(), 300)
+    return
+  }
+  // 正常开始录音
+  startVoiceInput()
 }
 
 function startVoiceInput() {
