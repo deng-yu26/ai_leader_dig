@@ -50,6 +50,7 @@
  */
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { connectLiveTalking, RTCState } from '@/utils/rtc'
+import { useDigitalHumanStore } from '@/store'
 
 const props = defineProps({
   emotion: { type: String, default: '平静' },
@@ -57,6 +58,7 @@ const props = defineProps({
   dhId: { type: Number, default: 1 }
 })
 
+const dhStore = useDigitalHumanStore()
 const viewerRef = ref(null)
 const videoRef = ref(null)
 const rtcState = ref(RTCState.DISCONNECTED)
@@ -85,7 +87,11 @@ function connect() {
 
   rtcState.value = RTCState.CONNECTING
 
-  rtcConnection = connectLiveTalking({
+  // 从 store 获取当前数字人对应的 LiveTalking avatar 文件夹名
+  const avatarId = dhStore.getCurrentAvatarId()
+  console.log('[Live2DViewer] 连接 avatar:', avatarId)
+
+  rtcConnection = connectLiveTalking(avatarId, {
     onStateChange(state) {
       rtcState.value = state
     },

@@ -336,6 +336,13 @@ def handle_chat(ws):
         if init_msg:
             parse_init_message(init_msg)
 
+        # 延迟触发欢迎动作（等前端同步 sessionid 过来）
+        def _trigger_welcome():
+            time.sleep(1.5)  # 等前端定时器把 sessionid 同步过来
+            if lt.is_available():
+                lt.set_audiotype(2, lt_sessionid or "")
+        threading.Thread(target=_trigger_welcome, daemon=True).start()
+
         while True:
             message = _receive(ws)
             if message is None:

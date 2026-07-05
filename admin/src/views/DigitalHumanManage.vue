@@ -2,9 +2,19 @@
   <div class="dh-manage">
     <h2 class="page-title">🪷 数字人管理</h2>
 
-    <!-- 添加按钮 -->
-    <div style="margin-bottom: 16px;">
+    <!-- 操作按钮 -->
+    <div style="margin-bottom: 16px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
       <el-button type="primary" @click="showDialog(null)">+ 添加数字人</el-button>
+      <el-divider direction="vertical" />
+      <span style="font-size: 13px; color: #909399;">LiveTalking 工具:</span>
+      <el-button type="success" plain size="small"
+                 @click="openLiveTalking('/avatar.html')">
+        🎬 生成新形象
+      </el-button>
+      <el-button type="warning" plain size="small"
+                 @click="openLiveTalking('/')">
+        ⚙️ LiveTalking 主配置
+      </el-button>
     </div>
 
     <!-- 数字人列表 -->
@@ -12,7 +22,11 @@
       <el-table :data="humans" stripe v-loading="loading" style="width: 100%">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="数字人名称" min-width="150" />
-        <el-table-column prop="model_path" label="模型路径" min-width="200" />
+        <el-table-column prop="model_path" label="Avatar文件夹" min-width="160">
+          <template #default="{ row }">
+            <el-tag size="small" type="warning">data/avatars/{{ row.model_path }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="默认参数" min-width="200">
           <template #default="{ row }">
             语速: {{ row.default_speed }} | 语调: {{ row.default_pitch }}
@@ -45,8 +59,13 @@
         <el-form-item label="数字人名称" prop="name" :rules="[{ required: true, message: '请输入名称' }]">
           <el-input v-model="form.name" />
         </el-form-item>
-        <el-form-item label="模型路径" prop="model_path" :rules="[{ required: true, message: '请输入模型路径' }]">
-          <el-input v-model="form.model_path" placeholder="/live2d_models/xxx/" />
+        <el-form-item label="Avatar文件夹" prop="model_path">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <el-input v-model="form.model_path" placeholder="例如: 1, wav2lip256_avatar1" />
+            <span style="font-size:11px;color:#909399">
+              对应 LiveTalking 中 data/avatars/ 下的文件夹名，如 <b>1</b>、<b>wav2lip256_avatar1</b>
+            </span>
+          </div>
         </el-form-item>
         <el-form-item label="默认语速" prop="default_speed">
           <el-slider v-model="form.default_speed" :min="0.5" :max="2.0" :step="0.1" show-input />
@@ -88,7 +107,7 @@ const editId = ref(null)
 
 const form = ref({
   name: '',
-  model_path: '/live2d_models/default/',
+  model_path: '1',
   default_speed: 1.0,
   default_pitch: 1.0,
   default_voice: 'zh-CN-XiaoxiaoNeural',
@@ -121,7 +140,7 @@ function showDialog(row) {
     editId.value = null
     form.value = {
       name: '',
-      model_path: '/live2d_models/default/',
+      model_path: '1',
       default_speed: 1.0,
       default_pitch: 1.0,
       default_voice: 'zh-CN-XiaoxiaoNeural',
@@ -164,5 +183,13 @@ async function handleDelete(id) {
   } catch (e) {
     ElMessage.error('删除失败')
   }
+}
+
+// 跳转到 LiveTalking 配置页面（两个项目独立部署，通过链接互访）
+function openLiveTalking(path) {
+  // LiveTalking 默认运行在 8010 端口，可通过环境变量覆盖
+  const ltHost = import.meta.env.VITE_LIVETALKING_HOST || window.location.hostname
+  const ltPort = import.meta.env.VITE_LIVETALKING_PORT || '8010'
+  window.open(`http://${ltHost}:${ltPort}${path}`, '_blank')
 }
 </script>

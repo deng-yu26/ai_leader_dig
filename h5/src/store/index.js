@@ -64,6 +64,12 @@ export const useDigitalHumanStore = defineStore('digitalHuman', {
     // 获取当前数字人完整信息
     getCurrentHuman() {
       return this.humans.find(h => h.id === this.currentId) || null
+    },
+
+    // 获取当前 LiveTalking avatar_id（即 model_path，如 "1"、"2"）
+    getCurrentAvatarId() {
+      const dh = this.getCurrentHuman()
+      return dh?.model_path || '1'
     }
   }
 })

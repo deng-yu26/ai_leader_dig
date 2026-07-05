@@ -102,6 +102,24 @@ class LiveTalkingService:
         except Exception as e:
             print(f"[LiveTalking] 打断失败：{e}")
 
+    def set_audiotype(self, audiotype: int, sessionid: str = ""):
+        """切换数字人动作状态
+        audiotype: 0=正常说话 1=静音空闲 2+=自定义动作
+        """
+        if not self._check_available():
+            return
+        try:
+            url = f"{self.api_url}/set_audiotype"
+            resp = self._session.post(
+                url,
+                json={"audiotype": audiotype, "sessionid": sessionid or ""},
+                timeout=5
+            )
+            if resp.status_code == 200:
+                print(f"[LiveTalking] 切换动作 audiotype={audiotype}")
+        except Exception as e:
+            print(f"[LiveTalking] 切换动作失败：{e}")
+
     def is_speaking(self, sessionid: str = "") -> bool:
         """查询 LiveTalking 是否正在说话"""
         if not self._check_available():

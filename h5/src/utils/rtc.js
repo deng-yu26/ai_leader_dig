@@ -24,7 +24,7 @@ export const RTCState = {
  * @param {function} callbacks.onSessionId - 收到 sessionid (sessionid)
  * @returns {{ close: function }}
  */
-export function connectLiveTalking(callbacks = {}) {
+export function connectLiveTalking(avatarId, callbacks = {}) {
   const pc = new RTCPeerConnection(ICE_SERVERS)
   let settled = false
   let sessionId = ''
@@ -64,7 +64,11 @@ export function connectLiveTalking(callbacks = {}) {
     const resp = await fetch('/offer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
+      body: JSON.stringify({
+        sdp: pc.localDescription.sdp,
+        type: pc.localDescription.type,
+        avatar: avatarId || ''
+      })
     })
     if (!resp.ok) throw new Error(`LiveTalking 返回 HTTP ${resp.status}`)
 
