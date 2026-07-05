@@ -57,13 +57,29 @@ CHROMA_TOP_K = 5  # 检索返回的最相似文档数量
 LIVETALKING_API_URL = "http://127.0.0.1:8010"      # LiveTalking 服务地址（默认端口 8010）
 LIVETALKING_ENABLED = True                           # 是否启用 3D 数字人口播
 # LiveTalking 的 data/avatars/ 目录（自动扫描已生成的数字人形象）
-# 如果自动推算不对，直接改成绝对路径，例如 r"C:\Users\Administrator\Downloads\LiveTalking\data\avatars"
-LIVETALKING_AVATARS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(BASE_DIR)),  # 到 livetalking/
-    "LiveTalking", "data", "avatars"
-)
-# 覆盖自动推算：取消下面注释并填入你的实际路径
-# LIVETALKING_AVATARS_DIR = r"D:\codeProject\livetalking\LiveTalking\data\avatars"
+# 优先级：环境变量 > 同级目录自动探测 > 默认路径
+def _find_avatars_dir():
+    import os
+    env_path = os.environ.get('LIVETALKING_AVATARS_DIR', '')
+    if env_path and os.path.isdir(env_path):
+        return env_path
+    # 探测：与 ai_leader_dig 同级目录下的 LiveTalking
+    sibling = os.path.join(
+        os.path.dirname(os.path.dirname(BASE_DIR)),
+        "LiveTalking", "data", "avatars"
+    )
+    if os.path.isdir(sibling):
+        return sibling
+    # 探测：常见下载目录
+    download = os.path.join(
+        os.path.expanduser("~"), "Downloads", "LiveTalking", "data", "avatars"
+    )
+    if os.path.isdir(download):
+        return download
+    # 都不存在，返回同级目录（让用户看到路径然后去设环境变量）
+    return sibling
+
+LIVETALKING_AVATARS_DIR = _find_avatars_dir()
 
 # ======================== WebSocket 配置 ========================
 WS_PING_INTERVAL = 30      # ping间隔（秒）

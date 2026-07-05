@@ -237,21 +237,22 @@ def delete_digital_human(dh_id):
 def list_avatars_on_disk():
     """扫描 LiveTalking data/avatars/ 目录，返回所有可用的 avatar 文件夹"""
     import os
+    import logging
+    log = logging.getLogger(__name__)
     from config import LIVETALKING_AVATARS_DIR
     avatars_dir = os.path.normpath(LIVETALKING_AVATARS_DIR)
-    print(f"[Avatar扫描] 扫描目录: {avatars_dir}")
-    print(f"[Avatar扫描] 目录存在: {os.path.isdir(avatars_dir)}")
+    log.warning(f"[Avatar扫描] 扫描目录: {avatars_dir}")
+    log.warning(f"[Avatar扫描] 目录存在: {os.path.isdir(avatars_dir)}")
     result = []
     if os.path.isdir(avatars_dir):
         for name in sorted(os.listdir(avatars_dir)):
             full = os.path.join(avatars_dir, name)
             if not os.path.isdir(full):
                 continue
-            # 检查是否是有效 avatar（有 coords.pkl 或 latents.pt 或 full_imgs）
             has_coords = os.path.isfile(os.path.join(full, 'coords.pkl'))
             has_latents = os.path.isfile(os.path.join(full, 'latents.pt'))
             has_imgs = os.path.isdir(os.path.join(full, 'full_imgs'))
-            print(f"[Avatar扫描]   {name}: coords={has_coords} latents={has_latents} imgs={has_imgs}")
+            log.warning(f"[Avatar扫描]   {name}: coords={has_coords} latents={has_latents} imgs={has_imgs}")
             if has_coords or has_latents or has_imgs:
                 result.append({
                     'folder': name,
@@ -260,8 +261,8 @@ def list_avatars_on_disk():
                     'has_imgs': has_imgs,
                 })
     else:
-        print(f"[Avatar扫描] 目录不存在! 请检查 config.py 中 LIVETALKING_AVATARS_DIR")
-    print(f"[Avatar扫描] 找到 {len(result)} 个 avatar")
+        log.warning(f"[Avatar扫描] 目录不存在! 设环境变量 LIVETALKING_AVATARS_DIR=你的路径")
+    log.warning(f"[Avatar扫描] 找到 {len(result)} 个 avatar")
     return jsonify({"code": 200, "data": result})
 
 

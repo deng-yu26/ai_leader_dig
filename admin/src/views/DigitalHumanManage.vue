@@ -54,38 +54,33 @@
     </el-card>
 
     <!-- 编辑对话框 -->
-    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑数字人' : '添加数字人'" width="480" :close-on-click-modal="false" destroy-on-close>
-      <el-form ref="formRef" :model="form" label-width="100px">
-        <el-form-item label="数字人名称" prop="name" :rules="[{ required: true, message: '请输入名称' }]">
-          <el-input v-model="form.name" />
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑数字人' : '添加数字人'" width="480" :close-on-click-modal="false">
+      <el-form :model="form" label-width="100px">
+        <el-form-item label="数字人名称" required>
+          <el-input v-model="form.name" placeholder="例如：女导游" />
         </el-form-item>
-        <el-form-item label="Avatar文件夹" prop="model_path">
-          <div style="display:flex;flex-direction:column;gap:4px">
-            <el-select v-model="form.model_path" placeholder="选择已生成的 Avatar..." filterable allow-create>
+        <el-form-item label="Avatar文件夹" required>
+          <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+            <el-select v-model="form.model_path" placeholder="选择已生成的 Avatar..." filterable allow-create style="width:100%">
               <el-option
                 v-for="a in avatarsOnDisk"
                 :key="a.folder"
                 :label="a.folder"
                 :value="a.folder"
-              >
-                <span>{{ a.folder }}</span>
-                <span style="float:right;font-size:11px;color:#909399;margin-left:8px">
-                  {{ a.has_coords ? '✅' : '' }}
-                </span>
-              </el-option>
+              />
             </el-select>
             <span style="font-size:11px;color:#909399">
-              自动扫描 LiveTalking <b>data/avatars/</b> 目录，也可手动输入新名称
+              {{ avatarsOnDisk.length === 0 ? '⚠ 未扫描到形象，请检查 LiveTalking 是否启动且 data/avatars/ 下有形象' : '自动扫描自 LiveTalking data/avatars/，也可手动输入' }}
             </span>
           </div>
         </el-form-item>
-        <el-form-item label="默认语速" prop="default_speed">
+        <el-form-item label="默认语速">
           <el-slider v-model="form.default_speed" :min="0.5" :max="2.0" :step="0.1" show-input />
         </el-form-item>
-        <el-form-item label="默认语调" prop="default_pitch">
+        <el-form-item label="默认语调">
           <el-slider v-model="form.default_pitch" :min="0.5" :max="2.0" :step="0.1" show-input />
         </el-form-item>
-        <el-form-item label="默认音色" prop="default_voice">
+        <el-form-item label="默认音色">
           <el-select v-model="form.default_voice" style="width: 100%;">
             <el-option label="晓晓（女声·推荐）" value="zh-CN-XiaoxiaoNeural" />
             <el-option label="云希（男声）" value="zh-CN-YunxiNeural" />
@@ -96,11 +91,12 @@
         <el-form-item label="启用状态">
           <el-switch v-model="form.is_active" />
         </el-form-item>
+        <!-- 按钮直接放 body 里确保一定显示 -->
+        <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:8px;padding-top:12px;border-top:1px solid #eee">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="handleSave">确认保存</el-button>
+        </div>
       </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
-      </template>
     </el-dialog>
   </div>
 </template>
