@@ -838,7 +838,8 @@ function scrollToBottom() {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: linear-gradient(180deg, #e8f5e9 0%, #dce8dc 40%, #cfdbcf 100%);
+  background: #f4f6f4;
+  /* background: linear-gradient(180deg, #e8f5e9 0%, #dce8dc 40%, #cfdbcf 100%); */
 }
 
 /* 模式A：全屏数字人 */
@@ -867,9 +868,18 @@ function scrollToBottom() {
   position: relative;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
   background: transparent;
   border-bottom: 1px solid rgba(91,140,90,0.1);
+  overflow: hidden;
+}
+/* 视频撑满全身，裁切只露上半身 */
+.live2d-compact :deep(.digital-human-video) {
+  object-fit: contain;
+  object-position: top center;
+  width: 100%;
+  height: auto;
+  min-height: 250%;
 }
 
 /* 通话状态指示 */
