@@ -59,3 +59,6 @@ backend/chroma_db/
 backend/lingshan.db
 backend/chroma_db/b3ebaa29-bfab-489d-824e-ee928302b8eb/data_level0.bin
 backend/chroma_db/chroma.sqlite3
+backend/chroma_db/b3ebaa29-bfab-489d-824e-ee928302b8eb/length.bin
+backend/chroma_db/b3ebaa29-bfab-489d-824e-ee928302b8eb/length.bin
+backend/chroma_db/b3ebaa29-bfab-489d-824e-ee928302b8eb/length.bin

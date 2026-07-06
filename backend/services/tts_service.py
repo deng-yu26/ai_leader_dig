@@ -44,18 +44,25 @@ class TTSService:
         """
         try:
             import edge_tts
+            import asyncio
 
             communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
             audio_data = bytearray()
 
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_data.extend(chunk["data"])
+            # 带超时的流式读取：国内连微软服务器可能很慢，5秒超时兜底
+            async def collect():
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_data.extend(chunk["data"])
 
-            return bytes(audio_data)
+            await asyncio.wait_for(collect(), timeout=5.0)
+            return bytes(audio_data) if audio_data else None
 
+        except asyncio.TimeoutError:
+            print(f"[TTS] 语音合成超时（5s），跳过音频: {text[:20]}...")
+            return None
         except ImportError:
-            print("[TTS] 警告：edge-tts未安装，返回模拟音频")
+            print("[TTS] 警告：edge-tts未安装")
             return None
         except Exception as e:
             print(f"[TTS] 语音合成失败：{e}")
