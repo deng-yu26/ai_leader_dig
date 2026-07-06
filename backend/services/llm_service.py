@@ -18,6 +18,7 @@ import json
 import base64
 import time
 import random
+import re
 import requests
 from typing import Optional, List, Dict, Any, Generator
 
@@ -242,6 +243,108 @@ class LLMService:
         except Exception as e:
             print(f"[LLM] 流式读取失败：{e}")
 
+    def chat_with_structured_answer(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        """调用大模型，返回带路线意图的结构化回答"""
+        if not self.is_configured():
+            return self._mock_structured_chat(messages)
+
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "stream": False
+        }
+
+        response = self._do_request(payload, stream=False)
+        if not response:
+            return self._mock_structured_chat(messages)
+
+        try:
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            return self.extract_route_info(messages[-1].get("content", ""), content)
+        except (KeyError, json.JSONDecodeError) as e:
+            print(f"[LLM] 结构化响应解析失败：{e}")
+            return self._mock_structured_chat(messages)
+
+    def extract_route_info(self, question: str, llm_response: str) -> Dict[str, Any]:
+        """从模型输出中抽取回答与路线信息"""
+        question_text = question or ""
+        response_text = llm_response or ""
+
+        candidate = response_text.strip()
+        parsed = None
+
+        try:
+            if candidate.startswith("{"):
+                parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+        if parsed is None:
+            match = re.search(r"\{.*\}", candidate, re.S)
+            if match:
+                try:
+                    parsed = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    parsed = None
+
+        if isinstance(parsed, dict):
+            answer = parsed.get("answer") or parsed.get("text") or response_text
+            if isinstance(answer, str):
+                answer = answer.replace("{", "").replace("}", "")
+                answer = re.sub(r'"(answer|route_intent|route_data|origin|destination|waypoints|mode|summary)"\s*:\s*', '', answer)
+                answer = re.sub(r'\s+', ' ', answer).strip()
+            route_intent = bool(parsed.get("route_intent")) or self._looks_like_route(question_text, answer)
+            route_data = parsed.get("route_data") or (self._build_route_data(question_text, answer) if route_intent else None)
+            return {
+                "answer": answer,
+                "route_intent": route_intent,
+                "route_data": route_data,
+            }
+
+        route_intent = self._looks_like_route(question_text, response_text)
+        route_data = self._build_route_data(question_text, response_text) if route_intent else None
+        return {
+            "answer": response_text,
+            "route_intent": route_intent,
+            "route_data": route_data,
+        }
+
+    def _looks_like_route(self, question: str, answer: str) -> bool:
+        text = f"{question}\n{answer}".lower()
+        route_keywords = [
+            "怎么去", "怎么走", "怎么到", "路线", "推荐路线", "前往", "出发", "走到", "导航", "地图"
+        ]
+        return any(keyword in text for keyword in route_keywords)
+
+    def _build_route_data(self, question: str, answer: str) -> Dict[str, Any]:
+        text = f"{question}\n{answer}".lower()
+        if "大佛" in text:
+            destination = "灵山大佛"
+            waypoints = ["佛足坛", "九龙灌浴"]
+        elif "梵宫" in text:
+            destination = "梵宫"
+            waypoints = ["佛足坛", "九龙灌浴"]
+        elif "拈花湾" in text:
+            destination = "拈花湾"
+            waypoints = ["梵宫", "灵山大佛"]
+        elif "路线" in text or "推荐路线" in text:
+            destination = "灵山大佛"
+            waypoints = ["佛足坛", "九龙灌浴"]
+        else:
+            destination = "灵山大佛"
+            waypoints = ["佛足坛", "九龙灌浴"]
+
+        return {
+            "origin": "南门",
+            "destination": destination,
+            "waypoints": waypoints,
+            "mode": "walk",
+            "summary": "适合步行游览，沿途可欣赏景区核心景点"
+        }
+
     def chat_with_image(self, text: str, image_data: bytes,
                         image_name: str = "image.jpg", stream: bool = False) -> str:
         """
@@ -319,6 +422,19 @@ class LLMService:
         except Exception as e:
             print(f"[LLM] 图文调用失败：{e}")
             return self._mock_chat([{"role": "user", "content": text + "(含图片)"}])
+
+    def _mock_structured_chat(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        """模拟结构化回复（智谱AI不可用时的降级方案）"""
+        answer = self._mock_chat(messages)
+        user_msg = " ".join(
+            msg.get("content", "") for msg in messages if msg["role"] == "user"
+        )
+        route_intent = self._looks_like_route(user_msg, answer)
+        return {
+            "answer": answer,
+            "route_intent": route_intent,
+            "route_data": self._build_route_data(user_msg, answer) if route_intent else None,
+        }
 
     def _mock_chat(self, messages: List[Dict[str, str]]) -> str:
         """模拟回复（智谱AI不可用时的降级方案）"""

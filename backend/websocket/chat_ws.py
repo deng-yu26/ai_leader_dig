@@ -21,6 +21,7 @@ import threading
 import time
 import base64
 import tempfile
+import uuid
 from typing import Optional
 
 # 添加父目录到路径
@@ -58,6 +59,7 @@ MSG_TYPE_EMOTION = "emotion"            # 情绪标签推送
 MSG_TYPE_STATUS = "status"              # 状态消息
 MSG_TYPE_ERROR = "error"                # 错误消息
 MSG_TYPE_DONE = "done"                  # 整个对话完成
+MSG_TYPE_ROUTE = "route"                # 路线导航信息
 
 
 # 全局待处理列表：[(interrupt_flag, ws, full_answer, lt_sessionid, lt), ...]
@@ -100,6 +102,7 @@ def handle_chat(ws):
     current_image_path = None
     current_image_data = None
     lt_sessionid = ""  # LiveTalking WebRTC session id
+    chat_session_id = str(uuid.uuid4())[:12]  # 本次 WebSocket 连接的一轮对话 ID
 
     # 获取服务实例
     rag = get_knowledge_processor()
@@ -110,11 +113,22 @@ def handle_chat(ws):
     lt = get_livetalking_service()  # LiveTalking 3D 数字人服务
 
     def parse_init_message(msg: dict):
-        """解析客户端初始化消息"""
+        """解析客户端初始化消息（支持嵌套 data 字段）"""
         nonlocal user_id, digital_human_id, tts_voice, tts_speed, tts_pitch
-        user_id = msg.get("user_id", 0)
-        dh_id = msg.get("digital_human_id", 1)
+        # 前端 websocket.js connect() 发送: { type:"text", data:'{"user_id":1,...}' }
+        # user_id 嵌套在 data 字符串里，先尝试顶层再尝试 data 字段
+        init_data = msg
+        if isinstance(msg.get("data"), str):
+            try:
+                inner = json.loads(msg["data"])
+                if isinstance(inner, dict):
+                    init_data = inner
+            except json.JSONDecodeError:
+                pass
+        user_id = init_data.get("user_id", 0)
+        dh_id = init_data.get("digital_human_id", 1)
         digital_human_id = dh_id
+        print(f"[WebSocket] 用户{user_id} 连接，数字人ID={dh_id}")
         try:
             dh = DigitalHuman.query.get(dh_id)
             if dh:
@@ -162,12 +176,14 @@ def handle_chat(ws):
         system_prompt = """你是一个专业的灵山胜境景区AI导游。你的职责是回答关于灵山胜境景区（含拈花湾禅意小镇）的所有问题。
 
 ## 回答规则（严格遵守）：
-1. 你只能回答与灵山胜境景区、拈花湾禅意小镇相关的内容，简短点。
+1. 你只能回答与灵山胜境景区、拈花湾禅意小镇相关的内容，回答简短一点。
 2. 如果用户问的问题与景区无关，请友好地引导用户询问景区相关问题。
 3. 回答内容要热情、生动、有感染力，适合导游讲解风格。
 4. 基于提供的知识库上下文进行回答，不要编造事实。
 5. 如果知识库中没有相关信息，请如实告知用户，并提供其他相关景点的介绍。
-6. 推荐游览路线时，可以结合用户的兴趣点和时间安排给出个性化建议。"""
+6. 用纯自然语言回答，不要输出 JSON、代码块或任何结构化格式。
+7. 如果用户问路线相关问题（怎么走、怎么去、推荐路线），直接给出具体的方向和步行指引。
+"""
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -187,6 +203,7 @@ def handle_chat(ws):
         chunk_index = 0
         full_audio = bytearray()
         emotion_label = "平静"
+        route_info = None
 
         # 获取LLM流式生成器
         if current_image_data and current_image_path:
@@ -272,8 +289,24 @@ def handle_chat(ws):
         emotion_label = emotion.get_emotion_label(full_answer)
         _send(ws, {"type": MSG_TYPE_EMOTION, "data": emotion_label})
 
+        # 清理 LLM 回答中可能残留的 JSON 语法字符
+        clean_answer = full_answer.strip()
+        clean_answer = re.sub(r'^[{\[]\s*"answer"\s*:\s*"', '', clean_answer)
+        clean_answer = re.sub(r'",?\s*"route_intent".*$', '', clean_answer)
+        clean_answer = re.sub(r'"\s*}$', '', clean_answer)
+        clean_answer = clean_answer.replace('\\n', '\n').strip()
+
         # 文本生成已完成，先发 text_end（关闭前端"思考中"状态）
-        _send(ws, {"type": MSG_TYPE_TEXT_END, "data": full_answer})
+        _send(ws, {"type": MSG_TYPE_TEXT_END, "data": clean_answer})
+
+        try:
+            route_info = llm.extract_route_info(question, full_answer)
+            if route_info.get("route_intent") and route_info.get("route_data"):
+                # 用干净的 answer 替换 route_info 中的 answer
+                route_info["answer"] = clean_answer
+                _send(ws, {"type": MSG_TYPE_ROUTE, "data": route_info})
+        except Exception as e:
+            print(f"[WebSocket] 路线信息发送失败：{e}")
 
         if lt_available:
             # LiveTalking 模式：数字人还在朗读，后台等待说完再发 done
@@ -339,13 +372,15 @@ def handle_chat(ws):
         try:
             voice_duration = len(full_audio) / 16000 if full_audio else 0
             log = ChatLog(
+                session_id=chat_session_id or "",
                 user_id=user_id or 0,
                 question_text=question,
-                answer_text=full_answer,
+                answer_text=clean_answer,
                 emotion_label=emotion_label,
                 voice_duration=voice_duration,
                 digital_human_id=digital_human_id,
                 tts_voice=tts_voice or "zh-CN-XiaoxiaoNeural",
+                route_data=json.dumps(route_info, ensure_ascii=False) if route_info else None,
             )
             db.session.add(log)
             db.session.commit()

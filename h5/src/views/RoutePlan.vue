@@ -24,8 +24,11 @@
                 </div>
               </div>
             </div>
-            <div class="route-tips">
-              <van-icon name="info-o" /> 💡 {{ routes.culture.tips }}
+            <div class="route-tips">💡 {{ routes.culture.tips }}</div>
+            <div class="route-action-row">
+              <van-button size="small" round plain type="primary" @click="openRouteOnMap(routes.culture)">
+                🗺️ 在地图上查看
+              </van-button>
             </div>
           </div>
         </van-tab>
@@ -86,8 +89,10 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { getRoutePlan } from '@/utils/api'
 
+const router = useRouter()
 const activeTab = ref(0)
 const routes = ref({})
 
@@ -136,6 +141,34 @@ onMounted(async () => {
     }
   }
 })
+
+// 解析 spot 名称（如 "南门→佛足坛→灵山大佛"）提取路线
+function openRouteOnMap(route) {
+  if (!route?.spots?.length) return
+  const allNames = []
+  for (const spot of route.spots) {
+    const parts = spot.name.split(/[→>]/).map(s => s.trim()).filter(Boolean)
+    allNames.push(...parts)
+  }
+  // 去重
+  const unique = [...new Set(allNames)]
+  if (unique.length < 2) {
+    unique.unshift('景区入口')
+  }
+  const origin = unique[0]
+  const destination = unique[unique.length - 1]
+  const waypoints = unique.slice(1, -1)
+  router.push({
+    path: '/route-map',
+    query: {
+      origin,
+      destination,
+      waypoints: waypoints.join(','),
+      mode: 'walk',
+      summary: `从${origin}出发，途经${waypoints.length}个景点，到达${destination}。${route.tips || ''}`
+    }
+  })
+}
 </script>
 
 <style scoped>
@@ -233,5 +266,9 @@ onMounted(async () => {
   padding: 10px 14px;
   border-radius: 8px;
   line-height: 1.5;
+}
+.route-action-row {
+  margin-top: 12px;
+  text-align: center;
 }
 </style>

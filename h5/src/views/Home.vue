@@ -103,6 +103,11 @@
                 </template>
               </div>
               <div class="bubble-text" v-else>{{ msg.text }}</div>
+              <div v-if="msg.role === 'ai' && msg.routeInfo" class="route-action">
+                <van-button size="small" round plain type="primary" @click="openRouteMap(msg.routeInfo)">
+                  查看地图
+                </van-button>
+              </div>
               <div class="bubble-meta">
                 <span class="bubble-time">{{ msg.time }}</span>
                 <span class="bubble-emotion" v-if="msg.emotion && msg.emotion !== '平静'">
@@ -244,6 +249,7 @@ const audioMuted = ref(false)       // 静音数字人播报
 const showTextPopup = ref(false)    // 模式A文字弹窗
 const popupText = ref('')
 const popupTextRef = ref(null)
+const userLocation = ref(null)
 
 // ---- 原有状态 ----
 const inputText = ref('')
@@ -278,6 +284,21 @@ onMounted(async () => {
   if (!userStore.isLoggedIn) {
     router.push('/login')
     return
+  }
+
+  try {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        userLocation.value = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        }
+      }, () => {
+        userLocation.value = null
+      }, { timeout: 4000 })
+    }
+  } catch (e) {
+    console.warn('定位失败', e)
   }
 
   try {
@@ -438,6 +459,15 @@ function setupWsHandlers() {
       }, 1000)
     }
   })
+
+  ws.on('route', (routeInfo) => {
+    if (isDiscarded) return
+    const lastAi = chatStore.messages[chatStore.messages.length - 1]
+    if (lastAi?.role === 'ai') {
+      lastAi.routeInfo = routeInfo
+      chatStore.persistMessages()
+    }
+  })
 }
 
 // ===== 模式切换 =====
@@ -456,8 +486,9 @@ function closeTextChat() {
 function toggleCall() {
   callActive.value = !callActive.value
   if (callActive.value) {
-    // TODO: 实现持续收音（Web Speech API / MediaRecorder 循环）
+    startCallRecording()
   } else {
+    stopCallRecording()
     closeToast()
   }
 }
@@ -470,6 +501,142 @@ function toggleMute() {
     } else {
       live2dRef.value.unmuteVideo?.()
     }
+  }
+}
+
+// ===== 通话模式：持续录音 + 简单 VAD 打断 =====
+let callStream = null
+let callAudioCtx = null
+let callSource = null
+let callAnalyser = null
+let callIntervalId = null
+let callMediaRecorder = null
+let callAudioChunks = []
+let callVadSpeaking = false
+let callVadSilenceTimer = null
+
+function startCallRecording() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showFailToast('设备不支持麦克风')
+    callActive.value = false
+    return
+  }
+
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+      callStream = stream
+      try {
+        callAudioCtx = new (window.AudioContext || window.webkitAudioContext)()
+        callSource = callAudioCtx.createMediaStreamSource(stream)
+        callAnalyser = callAudioCtx.createAnalyser()
+        callAnalyser.fftSize = 512
+        callSource.connect(callAnalyser)
+
+        const data = new Uint8Array(callAnalyser.fftSize)
+        const startThreshold = 0.02
+        const stopThreshold = 0.015
+
+        callIntervalId = setInterval(() => {
+          callAnalyser.getByteTimeDomainData(data)
+          let sum = 0
+          for (let i = 0; i < data.length; i++) {
+            const n = (data[i] - 128) / 128
+            sum += n * n
+          }
+          const rms = Math.sqrt(sum / data.length)
+
+          if (!callVadSpeaking && rms > startThreshold) {
+            // 说话开始
+            callVadSpeaking = true
+            // 发送打断信号，优先中断后端朗读
+            const ws = getWsClient()
+            if (ws && ws.isConnected.value) ws.sendInterrupt()
+            // 开始录音片段
+            startCallMediaRecorder(stream)
+          }
+
+          if (callVadSpeaking && rms <= stopThreshold) {
+            // 静音计时，确保短暂停顿不会立刻停止
+            if (!callVadSilenceTimer) {
+              callVadSilenceTimer = setTimeout(() => {
+                // 结束本次语音
+                callVadSpeaking = false
+                stopCallMediaRecorder()
+                clearTimeout(callVadSilenceTimer)
+                callVadSilenceTimer = null
+              }, 500)
+            }
+          } else if (rms > stopThreshold) {
+            if (callVadSilenceTimer) {
+              clearTimeout(callVadSilenceTimer)
+              callVadSilenceTimer = null
+            }
+          }
+        }, 120)
+      } catch (e) {
+        console.warn('[Call] VAD 初始化失败:', e)
+      }
+    })
+    .catch(() => {
+      showFailToast('麦克风访问被拒绝')
+      callActive.value = false
+    })
+}
+
+function stopCallRecording() {
+  if (callIntervalId) {
+    clearInterval(callIntervalId)
+    callIntervalId = null
+  }
+  if (callVadSilenceTimer) {
+    clearTimeout(callVadSilenceTimer)
+    callVadSilenceTimer = null
+  }
+  if (callMediaRecorder && callMediaRecorder.state === 'recording') {
+    try { callMediaRecorder.stop() } catch (_) {}
+  }
+  if (callAudioCtx) {
+    try { callAudioCtx.close() } catch (_) {}
+    callAudioCtx = null
+  }
+  if (callStream) {
+    callStream.getTracks().forEach(t => t.stop())
+    callStream = null
+  }
+  callSource = null
+  callAnalyser = null
+  callMediaRecorder = null
+  callAudioChunks = []
+  callVadSpeaking = false
+}
+
+function startCallMediaRecorder(stream) {
+  if (!stream) return
+  try {
+    callAudioChunks = []
+    callMediaRecorder = new MediaRecorder(stream)
+    callMediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) callAudioChunks.push(e.data)
+    }
+    callMediaRecorder.onstop = () => {
+      const blob = new Blob(callAudioChunks, { type: 'audio/webm' })
+      const reader = new FileReader()
+      reader.onload = () => {
+        const base64 = reader.result.split(',')[1]
+        const ws = getWsClient()
+        if (ws && ws.isConnected.value) ws.sendAudio(base64)
+      }
+      reader.readAsDataURL(blob)
+    }
+    callMediaRecorder.start()
+  } catch (e) {
+    console.warn('[Call] Start MediaRecorder failed:', e)
+  }
+}
+
+function stopCallMediaRecorder() {
+  if (callMediaRecorder && callMediaRecorder.state === 'recording') {
+    try { callMediaRecorder.stop() } catch (_) {}
   }
 }
 
@@ -531,6 +698,21 @@ function fallbackReply() {
     chatStore.addAiMessage('您好！我是灵山胜境AI导游。请问有什么可以帮您的？')
     scrollToBottom()
   }, 1000)
+}
+
+function openRouteMap(routeInfo) {
+  if (!routeInfo) return
+  const payload = routeInfo.route_data || routeInfo
+  if (!payload) return
+  // 直接跳转到路线地图页，不弹窗
+  const query = {
+    origin: payload.origin || '景区入口',
+    destination: payload.destination || '灵山大佛',
+    waypoints: (payload.waypoints || []).join(','),
+    mode: payload.mode || 'walk',
+    summary: payload.summary || ''
+  }
+  router.push({ path: '/route-map', query })
 }
 
 // ===== 语音输入 =====
@@ -834,6 +1016,10 @@ function scrollToBottom() {
 }
 
 /* ===== 内容区 ===== */
+.route-action {
+  margin-top: 8px;
+}
+
 .content-area {
   flex: 1;
   min-height: 0;

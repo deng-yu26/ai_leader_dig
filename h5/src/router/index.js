@@ -60,6 +60,12 @@ const routes = [
     name: 'digital-human',
     component: () => import('@/views/DigitalHuman.vue'),
     meta: { title: '切换数字人', requiresAuth: true }
+  },
+  {
+    path: '/route-map',
+    name: 'route-map',
+    component: () => import('@/views/RouteMap.vue'),
+    meta: { title: '路线地图', requiresAuth: true }
   }
 ]
 
