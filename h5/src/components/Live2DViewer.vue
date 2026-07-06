@@ -19,14 +19,21 @@
       </div>
     </div>
 
-    <!-- 3D 视频画面 -->
+    <!-- 3D 视频画面（隐藏 video，用 canvas 抠像后展示） -->
     <video
       ref="videoRef"
       class="digital-human-video"
       :class="{ 'video-loaded': rtcState === 'connected' }"
+      :style="chromeKey ? 'display:none' : ''"
       autoplay
       playsinline
     ></video>
+    <canvas
+      v-if="chromeKey"
+      ref="canvasRef"
+      class="digital-human-video"
+      :class="{ 'video-loaded': rtcState === 'connected' }"
+    />
 
     <!-- 说话状态指示 -->
     <div class="speaking-indicator" v-if="rtcState === 'connected' && isSpeaking">
@@ -55,21 +62,27 @@ import { useDigitalHumanStore } from '@/store'
 const props = defineProps({
   emotion: { type: String, default: '平静' },
   isSpeaking: { type: Boolean, default: false },
-  dhId: { type: Number, default: 1 }
+  dhId: { type: Number, default: 1 },
+  chromeKey: { type: Boolean, default: false },     // 是否启用绿幕抠像
+  keyColor: { type: String, default: '#5DBE4E' },    // 要抠掉的颜色
+  threshold: { type: Number, default: 0.3 }           // 容差 (0-1)
 })
 
 const dhStore = useDigitalHumanStore()
 const viewerRef = ref(null)
 const videoRef = ref(null)
+const canvasRef = ref(null)
 const rtcState = ref(RTCState.DISCONNECTED)
 const sessionId = ref('')
 let rtcConnection = null
+let chromeKeyAnimId = null
 
 onMounted(() => {
   connect()
 })
 
 onUnmounted(() => {
+  stopChromeKey()
   disconnect()
 })
 
@@ -98,6 +111,10 @@ function connect() {
     onStream(stream) {
       if (videoRef.value) {
         videoRef.value.srcObject = stream
+        // 绿幕抠像模式：启动 canvas 渲染循环
+        if (props.chromeKey) {
+          videoRef.value.addEventListener('loadedmetadata', startChromeKey)
+        }
       }
     },
     onSessionId(id) {
@@ -111,10 +128,74 @@ function getSessionId() {
   return sessionId.value
 }
 
+// ==== 绿幕抠像 ====
+function parseColor(hex) {
+  const c = hex.replace('#', '')
+  return {
+    r: parseInt(c.substring(0, 2), 16),
+    g: parseInt(c.substring(2, 4), 16),
+    b: parseInt(c.substring(4, 6), 16)
+  }
+}
+
+function startChromeKey() {
+  if (!props.chromeKey || !videoRef.value || !canvasRef.value) return
+  const video = videoRef.value
+  const canvas = canvasRef.value
+  canvas.width = video.videoWidth || 640
+  canvas.height = video.videoHeight || 480
+  processChromeKey()
+}
+
+function processChromeKey() {
+  if (!props.chromeKey || rtcState.value !== RTCState.CONNECTED) {
+    stopChromeKey()
+    return
+  }
+  const video = videoRef.value
+  const canvas = canvasRef.value
+  if (!video || !canvas || video.readyState < 2) {
+    chromeKeyAnimId = requestAnimationFrame(processChromeKey)
+    return
+  }
+
+  const ctx = canvas.getContext('2d')
+  // 保持宽高比
+  if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+    canvas.width = video.videoWidth || canvas.width
+    canvas.height = video.videoHeight || canvas.height
+  }
+
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+  const frame = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  const data = frame.data
+  const key = parseColor(props.keyColor)
+  const t = props.threshold * 255
+
+  for (let i = 0; i < data.length; i += 4) {
+    const dr = Math.abs(data[i] - key.r)
+    const dg = Math.abs(data[i + 1] - key.g)
+    const db = Math.abs(data[i + 2] - key.b)
+    if (dr < t && dg < t && db < t) {
+      data[i + 3] = 0  // 透明
+    }
+  }
+  ctx.putImageData(frame, 0, 0)
+  chromeKeyAnimId = requestAnimationFrame(processChromeKey)
+}
+
+function stopChromeKey() {
+  if (chromeKeyAnimId) {
+    cancelAnimationFrame(chromeKeyAnimId)
+    chromeKeyAnimId = null
+  }
+}
+
 /**
  * 断开 WebRTC 连接
  */
 function disconnect() {
+  stopChromeKey()
   if (rtcConnection) {
     rtcConnection.close()
     rtcConnection = null

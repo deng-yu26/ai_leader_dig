@@ -23,121 +23,193 @@
       </van-button>
     </div>
 
-    <!-- 内容区：对话(左) + 数字人全身(右下角) -->
-    <div class="content-area">
-      <!-- 对话气泡 -->
-      <div class="chat-bubbles" ref="bubbleRef">
-        <div v-if="messages.length === 0" class="chat-empty">
-          <div class="empty-icon">🪷</div>
-          <p class="empty-text">点击数字人开始对话<br>或输入您的问题</p>
-        </div>
-
-        <div
-          v-for="(msg, i) in messages"
-          :key="`${msg.id}-${i}`"
-          :class="['bubble', msg.role === 'user' ? 'user-bubble' : 'ai-bubble']"
-        >
-          <div class="bubble-avatar" v-if="msg.role === 'user'">👤</div>
-          <div class="bubble-content">
-            <div class="bubble-text">{{ msg.text }}</div>
-            <div class="bubble-meta">
-              <span class="bubble-time">{{ msg.time }}</span>
-              <span class="bubble-emotion" v-if="msg.emotion && msg.emotion !== '平静'">
-                {{ msg.emotion === '热情' ? '🔥' : '😊' }} {{ msg.emotion }}
-              </span>
-            </div>
+    <!-- ========== 模式 A：全屏数字人 ========== -->
+    <template v-if="viewMode === 'full'">
+      <div class="content-area full-mode">
+        <!-- 数字人全身 -->
+        <div class="live2d-container live2d-full" @click="onTapCharacter">
+          <Live2DViewer
+            ref="live2dRef"
+            :emotion="chatStore.currentEmotion"
+            :is-speaking="chatStore.isSpeaking"
+            :dh-id="dhStore.currentId"
+          />
+          <div class="emotion-badge" v-if="chatStore.currentEmotion !== '平静'">
+            {{ chatStore.currentEmotion === '热情' ? '🔥' : '😊' }}
+            {{ chatStore.currentEmotion }}
           </div>
-        </div>
-
-        <!-- AI思考中加载占位 -->
-        <div class="bubble ai-bubble" v-if="chatStore.isProcessing && !hasLastAiMsg">
-          <div class="bubble-content">
-            <div class="bubble-text thinking">
-              <van-loading type="ball" size="14" color="#5b8c5a" />
-              <span>思考中...</span>
-            </div>
+          <!-- 通话状态指示 -->
+          <div class="call-indicator" v-if="callActive">
+            <span class="call-dot"></span> 通话中
           </div>
         </div>
       </div>
 
-      <!-- 数字人全身（绝对定位右下角，融入对话区） -->
-      <div class="live2d-container" @click="onTapCharacter">
-        <Live2DViewer
-          ref="live2dRef"
-          :emotion="chatStore.currentEmotion"
-          :is-speaking="chatStore.isSpeaking"
-          :dh-id="dhStore.currentId"
-        />
-        <!-- 情绪标签 -->
-        <div class="emotion-badge" v-if="chatStore.currentEmotion !== '平静'">
-          {{ chatStore.currentEmotion === '热情' ? '🔥' : '😊' }}
-          {{ chatStore.currentEmotion }}
+      <!-- 底部通话操作栏 -->
+      <div class="action-bar">
+        <div class="action-btn mute" :class="{ active: audioMuted }" @click="toggleMute">
+          <van-icon :name="audioMuted ? 'volume-o' : 'volume-o'" size="22" />
+          <span>{{ audioMuted ? '已静音' : '静音' }}</span>
         </div>
-        <!-- 状态提示 -->
-        <div class="status-tip" v-if="chatStore.isProcessing">
-          <van-loading type="spinner" size="14" color="#5b8c5a" />
-          <span>思考中...</span>
+        <div class="action-btn call" :class="{ active: callActive }" @click="toggleCall">
+          <van-icon name="phone-o" size="32" />
+          <span>{{ callActive ? '挂断' : '通话' }}</span>
+        </div>
+        <div class="action-btn text" @click="openTextChat">
+          <van-icon name="chat-o" size="22" />
+          <span>文字</span>
         </div>
       </div>
-    </div>
+    </template>
 
-    <!-- 底部输入栏 -->
-    <div class="input-bar">
-      <div class="input-wrapper">
-        <!-- 图片上传按钮 -->
-        <van-icon name="photo-o" size="22" color="#5b8c5a" @click="showImageUpload = true" />
-        <!-- 文本输入 / 语音模式按住说话 -->
-        <input
-          v-if="!voiceMode"
-          v-model="inputText"
-          class="text-input"
-          placeholder="输入问题..."
-          @keydown.enter="sendText"
-        />
-        <div
-          v-else
-          :class="['hold-to-speak', { recording: isRecording }]"
-          @mousedown.prevent="startHoldSpeak"
-          @mouseup.prevent="stopHoldSpeak"
-          @mouseleave.prevent="stopHoldSpeak"
-          @touchstart.prevent="startHoldSpeak"
-          @touchend.prevent="stopHoldSpeak"
-        >
-          {{ isRecording ? '🎙️ 正在聆听...' : '🎙️ 请按住说话' }}
+    <!-- ========== 模式 B：对话模式 ========== -->
+    <template v-if="viewMode === 'chat'">
+      <div class="content-area chat-mode">
+        <!-- 数字人区（上方 40%，点击切回模式A） -->
+        <div class="live2d-container live2d-compact" @click="closeTextChat">
+          <Live2DViewer
+            ref="live2dRef"
+            :emotion="chatStore.currentEmotion"
+            :is-speaking="chatStore.isSpeaking"
+            :dh-id="dhStore.currentId"
+          />
+          <div class="emotion-badge" v-if="chatStore.currentEmotion !== '平静'">
+            {{ chatStore.currentEmotion === '热情' ? '🔥' : '😊' }}
+            {{ chatStore.currentEmotion }}
+          </div>
         </div>
-        <!-- 终止/语音按钮 -->
-        <van-icon
-          v-if="chatStore.isProcessing || chatStore.isSpeaking"
-          name="stop-circle-o"
-          color="#e74c3c"
-          size="22"
-          @click="stopReply"
-        />
-        <van-icon
-          v-else-if="voiceMode"
-          name="close"
-          color="#999"
-          size="22"
-          @click="exitVoiceMode"
-        />
-        <van-icon
-          v-else
-          name="phone-o"
-          color="#5b8c5a"
-          size="22"
-          @click="enterVoiceMode"
-        />
-        <!-- 发送按钮 -->
-        <van-icon
-          name="arrow-up"
-          size="20"
-          color="#fff"
-          class="send-btn"
-          @click="sendText"
-          v-if="inputText.trim()"
-        />
+
+        <!-- 对话区（下方 60%） -->
+        <div class="chat-bubbles" ref="bubbleRef">
+          <div v-if="messages.length === 0" class="chat-empty">
+            <div class="empty-icon">💬</div>
+            <p class="empty-text">输入你的问题，AI导游为你解答</p>
+          </div>
+
+          <div
+            v-for="(msg, i) in messages"
+            :key="`${msg.id}-${i}`"
+            :class="['bubble', msg.role === 'user' ? 'user-bubble' : 'ai-bubble']"
+          >
+            <div class="bubble-avatar" v-if="msg.role === 'user'">👤</div>
+            <div class="bubble-content">
+              <!-- AI 思考中 / 已停止 -->
+              <div class="bubble-text thinking" v-if="msg.role === 'ai' && !msg.text">
+                <template v-if="i === messages.length - 1 && chatStore.isProcessing">
+                  <span class="dot-pulse"></span>
+                </template>
+                <template v-else>
+                  <span class="stopped-text">已停止思考</span>
+                </template>
+              </div>
+              <div class="bubble-text" v-else>{{ msg.text }}</div>
+              <div class="bubble-meta">
+                <span class="bubble-time">{{ msg.time }}</span>
+                <span class="bubble-emotion" v-if="msg.emotion && msg.emotion !== '平静'">
+                  {{ msg.emotion === '热情' ? '🔥' : '😊' }} {{ msg.emotion }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <!-- 底部输入栏 -->
+      <div class="input-bar">
+        <div class="input-wrapper">
+          <!-- 图片上传（始终显示） -->
+          <van-icon name="photo-o" size="22" color="#5b8c5a" @click="showImageUpload = true" />
+
+          <!-- 文字输入模式 -->
+          <template v-if="!voiceMode">
+            <input
+              v-model="inputText"
+              class="text-input"
+              placeholder="输入问题..."
+              @keydown.enter="sendText"
+            />
+            <!-- 打断按钮（覆盖语音入口） / 语音入口 -->
+            <van-icon
+              v-if="chatStore.isProcessing || chatStore.isSpeaking"
+              name="stop-circle-o"
+              color="#e74c3c"
+              size="22"
+              @click="stopReply"
+            />
+            <van-icon
+              v-else
+              name="volume-o"
+              color="#5b8c5a"
+              size="22"
+              @click="enterVoiceMode"
+            />
+            <!-- 发送按钮（思考中隐藏，防止重复发送） -->
+            <van-icon
+              v-if="inputText.trim() && !chatStore.isProcessing && !chatStore.isSpeaking"
+              name="arrow-up"
+              size="20"
+              color="#fff"
+              class="send-btn"
+              @click="sendText"
+            />
+          </template>
+
+          <!-- 语音模式 -->
+          <template v-else>
+            <div
+              :class="['hold-to-speak', { recording: isRecording }]"
+              @mousedown.prevent="startHoldSpeak"
+              @mouseup.prevent="stopHoldSpeak"
+              @mouseleave.prevent="stopHoldSpeak"
+              @touchstart.prevent="startHoldSpeak"
+              @touchend.prevent="stopHoldSpeak"
+            >
+              {{ isRecording ? '🎙️ 正在聆听...' : '🎙️ 请按住说话' }}
+            </div>
+            <!-- 打断按钮（覆盖编辑入口，录音时都不显示） -->
+            <van-icon
+              v-if="chatStore.isProcessing || chatStore.isSpeaking"
+              name="stop-circle-o"
+              color="#e74c3c"
+              size="22"
+              @click="stopReply"
+            />
+            <van-icon
+              v-else-if="!isRecording"
+              name="chat-o"
+              color="#5b8c5a"
+              size="22"
+              @click="exitVoiceMode"
+            />
+          </template>
+        </div>
+      </div>
+    </template>
+
+    <!-- 模式A文字输入弹窗 -->
+    <van-popup v-model:show="showTextPopup" position="bottom" round :style="{ minHeight: '40%' }">
+      <div class="text-popup">
+        <div class="popup-header">
+          <span>文字提问</span>
+          <van-icon name="cross" size="18" @click="showTextPopup = false" />
+        </div>
+        <div class="popup-body">
+          <textarea
+            ref="popupTextRef"
+            v-model="popupText"
+            class="popup-textarea"
+            placeholder="输入你的问题..."
+            rows="4"
+          ></textarea>
+          <div class="popup-actions">
+            <van-icon name="photo-o" size="22" color="#5b8c5a" @click="showImageUpload = true" />
+            <van-button round type="primary" class="green-btn" @click="sendPopupText" :disabled="!popupText.trim()">
+              发送
+            </van-button>
+          </div>
+        </div>
+      </div>
+    </van-popup>
 
     <!-- 图片上传弹窗 -->
     <van-action-sheet v-model:show="showImageUpload" title="上传图片提问" close-on-click-action>
@@ -165,22 +237,40 @@ const chatStore = useChatStore()
 const dhStore = useDigitalHumanStore()
 const userStore = useUserStore()
 
+// ---- 双模式状态 ----
+const viewMode = ref('full')        // 'full' | 'chat'
+const callActive = ref(false)       // 持续收音开关
+const audioMuted = ref(false)       // 静音数字人播报
+const showTextPopup = ref(false)    // 模式A文字弹窗
+const popupText = ref('')
+const popupTextRef = ref(null)
+
+// ---- 原有状态 ----
 const inputText = ref('')
 const showImageUpload = ref(false)
 const isRecording = ref(false)
-const voiceMode = ref(false)       // 语音输入模式（输入框变成"按住说话"）
+const voiceMode = ref(false)
 const bubbleRef = ref(null)
 const live2dRef = ref(null)
 let currentAudioSource = null
 let isDiscarded = false
-let doneTimeoutId = null           // 旧 done 延迟定时器，新回复开始时清除
-let sessionIdTimer = null           // 标记本次回复是否已被丢弃（暂停后忽略剩余片段）
+let doneTimeoutId = null
+let sessionIdTimer = null
 
 // --- 响应式消息列表 ---
 const messages = computed(() => chatStore.messages)
 const hasLastAiMsg = computed(() => {
   const msgs = chatStore.messages
   return msgs.length > 0 && msgs[msgs.length - 1].role === 'ai'
+})
+
+// 思考气泡：isProcessing 且最后一条 AI 消息还没有文字内容
+const showThinkingBubble = computed(() => {
+  if (!chatStore.isProcessing) return false
+  const msgs = chatStore.messages
+  if (msgs.length === 0) return true
+  const last = msgs[msgs.length - 1]
+  return last.role === 'ai' && !last.text
 })
 
 // ===== 生命周期 =====
@@ -206,7 +296,6 @@ onMounted(async () => {
 
   await fetchDigitalHumans()
 
-  // 定时同步 LiveTalking sessionid → WebSocket 客户端
   sessionIdTimer = setInterval(() => {
     const sid = live2dRef.value?.getSessionId?.()
     if (sid) {
@@ -221,7 +310,6 @@ onUnmounted(() => {
   destroyWsClient()
 })
 
-// --- 消息变化自动滚动 ---
 watch(
   () => chatStore.messages.length,
   () => nextTick(() => scrollToBottom())
@@ -251,7 +339,10 @@ function playNextAudio() {
       const source = ctx.createBufferSource()
       currentAudioSource = source
       source.buffer = buffer
-      source.connect(ctx.destination)
+      // 如果静音，不连接扬声器，但仍走完播放流程
+      if (!audioMuted.value) {
+        source.connect(ctx.destination)
+      }
       source.onended = () => {
         if (currentAudioSource === source) currentAudioSource = null
         isPlayingAudio = false
@@ -275,7 +366,6 @@ function setupWsHandlers() {
   const ws = getWsClient()
   if (!ws) return
 
-  // ---- 用户语音识别结果：展示为用户消息 ----
   ws.on('user_text', (text) => {
     if (text) {
       chatStore.addUserMessage(text, 'voice')
@@ -283,74 +373,64 @@ function setupWsHandlers() {
     }
   })
 
-  // ---- AI开始生成：清空音频队列，预创建新AI消息 ----
   ws.on('text_start', () => {
     isDiscarded = false
-    // 取消旧的 done 定时器，防止旧回复覆盖新回复的 isSpeaking 状态
     if (doneTimeoutId) {
       clearTimeout(doneTimeoutId)
       doneTimeoutId = null
     }
-    chatStore.setProcessing(true)
-    chatStore.setEmotion('平静')
-    audioQueue.value = []
-    isPlayingAudio = false
-    // 预创建一条空 AI 消息，后续 text_chunk 直接追加到这条新消息上
-    chatStore.addAiMessage('')
+    // 如果前端已经预创建了空 AI 消息（sendText 立即展示），不再重复创建
+    const msgs = chatStore.messages
+    const lastEmpty = msgs.length > 0 && msgs[msgs.length - 1].role === 'ai' && !msgs[msgs.length - 1].text
+    if (!lastEmpty) {
+      chatStore.setProcessing(true)
+      chatStore.setEmotion('平静')
+      audioQueue.value = []
+      isPlayingAudio = false
+      chatStore.addAiMessage('')
+    }
   })
 
-  // ---- AI文本片段：追加到当前AI消息 ----
   ws.on('text_chunk', ({ text }) => {
     if (isDiscarded) return
     chatStore.appendAiText(text)
     scrollToBottom()
   })
 
-  // ---- AI文本结束：关闭处理状态 ----
   ws.on('text_end', () => {
     if (isDiscarded) return
     chatStore.setProcessing(false)
   })
 
-  // ---- AI音频片段：加入播放队列 ----
   ws.on('audio_chunk', ({ audio, lt_synced }) => {
     if (isDiscarded) return
-    // LiveTalking 同步模式：音频由 WebRTC 视频流提供，本地跳过播放
     if (lt_synced) {
       chatStore.isSpeaking = true
       return
     }
-    // 本地 TTS 模式：加入播放队列
     if (audio) {
       audioQueue.value.push(audio)
       if (!isPlayingAudio) playNextAudio()
     }
   })
 
-  // ---- 情绪推送 ----
   ws.on('emotion', (emotion) => {
     if (isDiscarded) return
     chatStore.setEmotion(emotion)
   })
 
-  // ---- 状态消息 ----
-  ws.on('status', (status) => {
-    showLoadingToast({ message: status, duration: 0, forbidClick: true })
-    setTimeout(() => closeToast(), 2000)
-  })
+  // ---- 状态消息（静默，思考态由气泡动画展示） ----
+  ws.on('status', () => {})
 
-  // ---- 错误消息 ----
   ws.on('error', (error) => {
     showFailToast(error)
     chatStore.setProcessing(false)
   })
 
-  // ---- 整个对话完成 ----
   ws.on('done', () => {
     if (isDiscarded) return
     chatStore.setProcessing(false)
     if (audioQueue.value.length === 0) {
-      // 使用可取消的定时器，防止旧 done 在新回复开始后覆盖 isSpeaking
       if (doneTimeoutId) clearTimeout(doneTimeoutId)
       doneTimeoutId = setTimeout(() => {
         chatStore.isSpeaking = false
@@ -360,44 +440,86 @@ function setupWsHandlers() {
   })
 }
 
+// ===== 模式切换 =====
+function openTextChat() {
+  viewMode.value = 'chat'
+  showTextPopup.value = false
+  popupText.value = ''
+  nextTick(() => scrollToBottom())
+}
+
+function closeTextChat() {
+  viewMode.value = 'full'
+}
+
+// ===== 通话控制按钮 =====
+function toggleCall() {
+  callActive.value = !callActive.value
+  if (callActive.value) {
+    // TODO: 实现持续收音（Web Speech API / MediaRecorder 循环）
+  } else {
+    closeToast()
+  }
+}
+
+function toggleMute() {
+  audioMuted.value = !audioMuted.value
+  if (live2dRef.value) {
+    if (audioMuted.value) {
+      live2dRef.value.muteVideo?.()
+    } else {
+      live2dRef.value.unmuteVideo?.()
+    }
+  }
+}
+
 // ===== 发送文本 =====
 function sendText() {
   const text = inputText.value.trim()
   if (!text) return
 
-  if (voiceMode.value) exitVoiceMode()
+  // 防止重复发送
+  if (chatStore.isProcessing || chatStore.isSpeaking) return
+
+  if (viewMode.value === 'full') openTextChat()
 
   inputText.value = ''
+
+  // 立即展示用户消息 + AI思考气泡
   chatStore.addUserMessage(text, 'text')
+  chatStore.setProcessing(true)
+  chatStore.setEmotion('平静')
+  isDiscarded = false
+  audioQueue.value = []
+  isPlayingAudio = false
+  chatStore.addAiMessage('')  // 空消息 → 三点动画
   scrollToBottom()
 
-  // 数字人正在思考 OR 正在朗读 → 打断后发送新问题
-  if (chatStore.isProcessing || chatStore.isSpeaking) {
-    const ws = getWsClient()
-    if (ws && ws.isConnected.value) {
-      ws.sendInterrupt()
-      // 丢弃旧回复的所有后续消息
-      isDiscarded = true
-      audioQueue.value = []
-      isPlayingAudio = false
-      if (currentAudioSource) {
-        try { currentAudioSource.stop() } catch (_) {}
-        currentAudioSource = null
-      }
-      chatStore.setProcessing(false)
-      chatStore.isSpeaking = false
-      closeToast()
-      // 稍等打断生效 + LiveTalking 管线清空，再发新问题
-      setTimeout(() => {
-        const ws2 = getWsClient()
-        if (ws2 && ws2.isConnected.value) ws2.sendText(text)
-        else fallbackReply()
-      }, 300)
-    } else {
-      fallbackReply()
-    }
-    return
+  const ws = getWsClient()
+  if (ws && ws.isConnected.value) {
+    ws.sendText(text)
+  } else {
+    fallbackReply()
   }
+}
+
+// 模式A弹窗发送
+function sendPopupText() {
+  const text = popupText.value.trim()
+  if (!text) return
+  if (chatStore.isProcessing || chatStore.isSpeaking) return
+
+  openTextChat()
+  showTextPopup.value = false
+
+  chatStore.addUserMessage(text, 'text')
+  chatStore.setProcessing(true)
+  chatStore.setEmotion('平静')
+  isDiscarded = false
+  audioQueue.value = []
+  isPlayingAudio = false
+  chatStore.addAiMessage('')
+  scrollToBottom()
 
   const ws = getWsClient()
   if (ws && ws.isConnected.value) ws.sendText(text)
@@ -411,20 +533,20 @@ function fallbackReply() {
   }, 1000)
 }
 
-// ===== 语音输入（按住说话模式） =====
+// ===== 语音输入 =====
 let mediaRecorder = null
 let audioChunks = []
 let holdStartTime = 0
+let silenceDetector = null     // { audioContext, analyser, dataArray, maxVolume, intervalId }
 
 function enterVoiceMode() {
   voiceMode.value = true
+  inputText.value = ''  // 清空文字，避免发送按钮遮挡键盘图标
 }
 
 function exitVoiceMode() {
   voiceMode.value = false
-  if (isRecording.value) {
-    stopHoldSpeak()
-  }
+  if (isRecording.value) stopHoldSpeak()
 }
 
 function startHoldSpeak() {
@@ -439,20 +561,65 @@ function startHoldSpeak() {
 
   navigator.mediaDevices.getUserMedia({ audio: true })
     .then(stream => {
+      // ---- 静音检测：AnalyserNode + RMS 标准音量算法 ----
+      const detector = { audioCtx: null, intervalId: null, maxRms: 0 }
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+        const source = audioCtx.createMediaStreamSource(stream)
+        const analyser = audioCtx.createAnalyser()
+        analyser.fftSize = 512
+        source.connect(analyser)
+        const timeData = new Uint8Array(analyser.fftSize)
+
+        const intervalId = setInterval(() => {
+          analyser.getByteTimeDomainData(timeData)
+          // 标准 RMS 计算：归一化到 -1..1，平方平均后开方
+          let sumSquares = 0
+          for (let i = 0; i < timeData.length; i++) {
+            const normalized = (timeData[i] - 128) / 128
+            sumSquares += normalized * normalized
+          }
+          const rms = Math.sqrt(sumSquares / timeData.length)
+          if (rms > detector.maxRms) detector.maxRms = rms
+        }, 100)
+
+        detector.audioCtx = audioCtx
+        detector.intervalId = intervalId
+        silenceDetector = detector
+      } catch (e) {
+        console.warn('[Audio] 静音检测初始化失败:', e)
+        silenceDetector = null
+      }
+
+      // ---- 录音 ----
       mediaRecorder = new MediaRecorder(stream)
       mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data)
 
       mediaRecorder.onstop = () => {
+        // 清理静音检测
+        const det = silenceDetector
+        if (det) {
+          clearInterval(det.intervalId)
+          det.audioCtx.close()
+        }
+
         const duration = (Date.now() - holdStartTime) / 1000
         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' })
 
-        // 静音检测：时长太短或数据量太小 → 未检测到声音
-        if (duration < 0.5 || audioBlob.size < 2000) {
+        // 标准静音判断：RMS < 0.015 视为静音（典型语音 RMS 0.02~0.2）
+        const hasVolume = det
+          ? det.maxRms > 0.015
+          : audioBlob.size > 8000
+
+        if (duration < 0.4 || !hasVolume) {
           showFailToast('未检测到声音，请重试')
           isRecording.value = false
+          silenceDetector = null
           stream.getTracks().forEach(track => track.stop())
           return
         }
+
+        silenceDetector = null
 
         const reader = new FileReader()
         reader.onload = () => {
@@ -463,7 +630,6 @@ function startHoldSpeak() {
         reader.readAsDataURL(audioBlob)
         stream.getTracks().forEach(track => track.stop())
         isRecording.value = false
-        // 发送完成后退出语音模式，回到文本输入
         voiceMode.value = false
       }
 
@@ -481,13 +647,12 @@ function stopHoldSpeak() {
   }
 }
 
+// ===== 打断/关闭 =====
 function stopReply() {
   const ws = getWsClient()
   if (ws && ws.isConnected.value) ws.sendInterrupt()
 
-  // 丢弃当前回复所有后续消息片段
   isDiscarded = true
-  // 取消旧 done 定时器，防止其覆盖新回复的 isSpeaking
   if (doneTimeoutId) {
     clearTimeout(doneTimeoutId)
     doneTimeoutId = null
@@ -498,10 +663,11 @@ function stopReply() {
   chatStore.setProcessing(false)
   chatStore.isSpeaking = false
 
-  // LiveTalking 3D 模式：立即静音视频（因引擎无法中断当前句）
   live2dRef.value?.muteVideo?.()
   setTimeout(() => {
-    live2dRef.value?.unmuteVideo?.()
+    if (!audioMuted.value) {
+      live2dRef.value?.unmuteVideo?.()
+    }
   }, 2000)
 
   if (currentAudioSource) {
@@ -512,6 +678,13 @@ function stopReply() {
   closeToast()
 }
 
+// ===== 点击数字人 → 打断 =====
+function onTapCharacter() {
+  if (chatStore.isProcessing || chatStore.isSpeaking) {
+    stopReply()
+  }
+}
+
 // ===== 图片上传 =====
 function onImageRead(file) {
   showImageUpload.value = false
@@ -520,10 +693,13 @@ function onImageRead(file) {
   const reader = new FileReader()
   reader.onload = (e) => {
     const base64 = e.target.result.split(',')[1]
-    const text = inputText.value.trim() || '请分析这张图片'
+    const text = inputText.value.trim() || popupText.value.trim() || '请分析这张图片'
+
+    if (viewMode.value === 'full') openTextChat()
 
     chatStore.addUserMessage(text, 'image')
     inputText.value = ''
+    popupText.value = ''
 
     const ws = getWsClient()
     if (ws && ws.isConnected.value) {
@@ -538,7 +714,7 @@ function onImageRead(file) {
   reader.readAsDataURL(file.file)
 }
 
-// ===== 路线推荐（从Chat.vue集成） =====
+// ===== 路线推荐 =====
 function showRoutes() {
   Dialog.confirm({
     title: '选择游览路线',
@@ -547,9 +723,11 @@ function showRoutes() {
     cancelButtonText: '文化朝圣',
     showCancelButton: true
   }).then(() => {
+    if (viewMode.value === 'full') openTextChat()
     chatStore.addAiMessage('🌄 自然风光路线（5小时全景游）：南门→佛足坛→九龙灌浴→菩提大道→灵山大佛→曼飞龙塔→灵山精舍→梵宫广场。漫步菩提大道欣赏太湖风光，登顶大佛俯瞰全景，感受人与自然和谐统一。')
     scrollToBottom()
   }).catch(() => {
+    if (viewMode.value === 'full') openTextChat()
     chatStore.addAiMessage('🙏 文化朝圣路线（3小时精华游）：南门→佛足坛→九龙灌浴→祥符禅寺→灵山大佛→梵宫→五印坛城。深度体验佛教文化，欣赏梵宫艺术殿堂。')
     scrollToBottom()
   })
@@ -567,7 +745,7 @@ function showRoutes() {
   }, 500)
 }
 
-// ===== 热门问题（从Chat.vue集成） =====
+// ===== 热门问题 =====
 function showHotQuestions() {
   const questions = [
     '灵山胜境门票多少钱？',
@@ -582,16 +760,6 @@ function showHotQuestions() {
     message: questions.map((q, i) => `${i + 1}. ${q}`).join('\n'),
     confirmButtonText: '知道了'
   })
-}
-
-// ===== 点击数字人 =====
-function onTapCharacter() {
-  if (!chatStore.isProcessing) {
-    const greetings = ['你好呀！欢迎来到灵山胜境~', '有什么可以帮助您的吗？', '今天想去哪里玩呢？']
-    const msg = greetings[Math.floor(Math.random() * greetings.length)]
-    chatStore.addAiMessage(msg)
-    scrollToBottom()
-  }
 }
 
 // ===== 切换数字人 =====
@@ -665,35 +833,73 @@ function scrollToBottom() {
   padding: 0 10px !important;
 }
 
+/* ===== 内容区 ===== */
 .content-area {
   flex: 1;
   min-height: 0;
-  position: relative;
   overflow: hidden;
-  /* 统一背景：与页面底部渐变衔接 */
   background: linear-gradient(180deg, #e8f5e9 0%, #dce8dc 40%, #cfdbcf 100%);
 }
 
-.live2d-container {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 40%;
-  max-width: 200px;
-  height: 85%;
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  background: transparent;
-  overflow: visible;
-  pointer-events: auto;
-  z-index: 2;
+/* 模式A：全屏数字人 */
+.full-mode {
+  position: relative;
 }
 
+.live2d-full {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: transparent;
+}
+
+/* 模式B：上下分布 */
+.chat-mode {
+  display: flex;
+  flex-direction: column;
+}
+
+.live2d-compact {
+  flex: 0 0 40%;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: transparent;
+  border-bottom: 1px solid rgba(91,140,90,0.1);
+}
+
+/* 通话状态指示 */
+.call-indicator {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(76, 175, 80, 0.15);
+  color: #388e3c;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  z-index: 5;
+}
+.call-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4caf50;
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+/* 情绪+状态 */
 .emotion-badge {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 10px;
+  right: 12px;
   background: rgba(0,0,0,0.45);
   color: #fff;
   padding: 3px 10px;
@@ -704,7 +910,7 @@ function scrollToBottom() {
 
 .status-tip {
   position: absolute;
-  bottom: 8px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -712,22 +918,89 @@ function scrollToBottom() {
   gap: 4px;
   background: rgba(0,0,0,0.45);
   color: #fff;
-  padding: 4px 10px;
+  padding: 4px 12px;
   border-radius: 20px;
   font-size: 11px;
   white-space: nowrap;
   z-index: 5;
 }
 
+/* ===== 通话操作栏（模式A） ===== */
+.action-bar {
+  display: flex;
+  justify-content: space-evenly;
+  align-items: center;
+  padding: 14px 24px;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(91,140,90,0.08);
+}
+
+.action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.action-btn:active {
+  transform: scale(0.93);
+}
+
+/* 左右小按钮 */
+.action-btn.mute,
+.action-btn.text {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #f0f4eb;
+  color: #5b8c5a;
+  justify-content: center;
+  font-size: 11px;
+}
+.action-btn.mute.active {
+  background: #fff0e6;
+  color: #e67e22;
+}
+.action-btn.mute.active :deep(.van-icon) {
+  color: #e67e22;
+}
+
+/* 中间通话大按钮 */
+.action-btn.call {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #5b8c5a, #7cb342);
+  color: #fff;
+  justify-content: center;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(91,140,90,0.35);
+}
+.action-btn.call :deep(.van-icon) {
+  line-height: 1;
+}
+.action-btn.call.active {
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  box-shadow: 0 4px 16px rgba(231,76,60,0.35);
+  animation: call-pulse 1.8s ease-in-out infinite;
+}
+@keyframes call-pulse {
+  0%, 100% { box-shadow: 0 4px 16px rgba(231,76,60,0.35); }
+  50% { box-shadow: 0 4px 28px rgba(231,76,60,0.55); }
+}
+
+/* ===== 对话气泡（模式B） ===== */
 .chat-bubbles {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 12px 16px;
-  padding-left: 38%;
   -webkit-overflow-scrolling: touch;
-  position: relative;
-  z-index: 1;
 }
 
 .chat-empty {
@@ -740,13 +1013,13 @@ function scrollToBottom() {
 }
 
 .empty-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
-  opacity: 0.5;
+  font-size: 40px;
+  margin-bottom: 10px;
+  opacity: 0.4;
 }
 
 .empty-text {
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.8;
   text-align: center;
 }
@@ -754,7 +1027,7 @@ function scrollToBottom() {
 .bubble {
   display: flex;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   width: 100%;
   animation: fadeInUp 0.3s ease;
 }
@@ -786,13 +1059,7 @@ function scrollToBottom() {
 }
 
 .bubble-content {
-  max-width: 75%;
-}
-
-.user-bubble .bubble-text,
-.user-bubble .bubble-time,
-.user-bubble .bubble-meta {
-  text-align: right;
+  max-width: 80%;
 }
 
 .user-bubble .bubble-content {
@@ -820,9 +1087,50 @@ function scrollToBottom() {
 .bubble-text.thinking {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  padding: 4px 0;
+  min-height: 24px;
+}
+
+.stopped-text {
   color: #9aab9a;
   font-size: 13px;
+}
+
+/* 循环三点动画 */
+.dot-pulse {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #9aab9a;
+  animation: dot-typing 1.4s infinite both;
+  position: relative;
+  margin-left: 12px;
+}
+.dot-pulse::before,
+.dot-pulse::after {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #9aab9a;
+  position: absolute;
+  top: 0;
+}
+.dot-pulse::before {
+  left: -16px;
+  animation: dot-typing 1.4s 0.2s infinite both;
+}
+.dot-pulse::after {
+  left: 16px;
+  animation: dot-typing 1.4s 0.4s infinite both;
+}
+
+@keyframes dot-typing {
+  0%, 60%, 100% { opacity: 0.2; transform: scale(0.8); }
+  30% { opacity: 1; transform: scale(1); }
 }
 
 .bubble-meta {
@@ -837,6 +1145,11 @@ function scrollToBottom() {
   justify-content: flex-end;
 }
 
+.user-bubble .bubble-text,
+.user-bubble .bubble-time {
+  text-align: right;
+}
+
 .ai-bubble .bubble-meta {
   justify-content: flex-start;
 }
@@ -845,6 +1158,7 @@ function scrollToBottom() {
   font-size: 11px;
 }
 
+/* ===== 底部输入栏（模式B） ===== */
 .input-bar {
   padding: 8px 16px;
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
@@ -905,8 +1219,65 @@ function scrollToBottom() {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
+/* ===== 文字弹窗（模式A） ===== */
+.text-popup {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #2e3d2e;
+  border-bottom: 1px solid #eee;
+}
+
+.popup-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+  gap: 16px;
+}
+
+.popup-textarea {
+  flex: 1;
+  border: 1px solid #e0e8dc;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 15px;
+  color: #2e3d2e;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  background: #f8faf5;
+}
+
+.popup-textarea::placeholder {
+  color: #9aab9a;
+}
+
+.popup-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.green-btn {
+  background: linear-gradient(135deg, #5b8c5a, #7cb342) !important;
+  color: #fff !important;
+  border: none !important;
+}
+
+/* ===== 图片上传弹窗 ===== */
 .upload-sheet {
   padding: 20px;
   text-align: center;
