@@ -103,6 +103,7 @@ def handle_chat(ws):
     current_image_data = None
     lt_sessionid = ""  # LiveTalking WebRTC session id
     chat_session_id = str(uuid.uuid4())[:12]  # 本次 WebSocket 连接的一轮对话 ID
+    welcome_played = False  # 欢迎动作只播一次
 
     # 获取服务实例
     rag = get_knowledge_processor()
@@ -190,12 +191,19 @@ def handle_chat(ws):
             {"role": "user", "content": f"知识库参考信息：\n{context}\n\n用户问题：{question}"}
         ]
 
-        # ---- 步骤3：流式LLM生成 + 实时推送 ----
+        # ---- 步骤3：动作状态机 + 流式LLM生成 ----
+        nonlocal welcome_played
+        if lt_available:
+            if not welcome_played:
+                welcome_played = True
+                def _play_welcome():
+                    time.sleep(0.5)
+                    lt.set_audiotype(2, lt_sessionid or "")
+                threading.Thread(target=_play_welcome, daemon=True).start()
+            lt.set_audiotype(3, lt_sessionid)
+
         _send(ws, {"type": MSG_TYPE_STATUS, "data": "AI导游正在思考..."})
         _send(ws, {"type": MSG_TYPE_TEXT_START, "data": ""})
-        # 触发"思考"动作（audiotype=3）
-        if lt_available:
-            lt.set_audiotype(3, lt_sessionid)
 
         full_answer = ""
         text_buffer = ""       # 累积流式文本
@@ -204,6 +212,14 @@ def handle_chat(ws):
         full_audio = bytearray()
         emotion_label = "平静"
         route_info = None
+        first_sentence_sent = False
+
+        def lt_speak_and_normal(text):
+            nonlocal first_sentence_sent
+            if not first_sentence_sent and lt_available:
+                first_sentence_sent = True
+                lt.set_audiotype(0, lt_sessionid)
+            lt.speak(text, lt_sessionid)
 
         # 获取LLM流式生成器
         if current_image_data and current_image_path:
@@ -224,7 +240,7 @@ def handle_chat(ws):
                         audio_b64 = base64.b64encode(audio).decode("utf-8")
                         _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": audio_b64, "index": i, "text": sentence})
                 # 同步推送到 LiveTalking 3D 数字人口播
-                lt.speak(sentence, lt_sessionid)
+                lt_speak_and_normal(sentence)
                 chunk_index += 1
         else:
             # 流式模式：逐字/逐段从LLM接收并实时推送到前端
@@ -256,7 +272,7 @@ def handle_chat(ws):
                                     audio_b64 = base64.b64encode(audio).decode("utf-8")
                                     _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": audio_b64, "index": chunk_index, "text": s})
                             # 同步推送到 LiveTalking 3D 数字人口播
-                            lt.speak(s, lt_sessionid)
+                            lt_speak_and_normal(s)
                             chunk_index += 1
                     sentence_buffer = ""
 
@@ -277,7 +293,7 @@ def handle_chat(ws):
                         audio_b64 = base64.b64encode(audio).decode("utf-8")
                         _send(ws, {"type": MSG_TYPE_AUDIO_CHUNK, "data": audio_b64, "index": chunk_index, "text": remaining})
                 # 同步推送到 LiveTalking 3D 数字人口播
-                lt.speak(remaining, lt_sessionid)
+                lt_speak_and_normal(remaining)
 
         if is_interrupted:
             return
@@ -393,13 +409,6 @@ def handle_chat(ws):
         init_msg = _receive(ws)
         if init_msg:
             parse_init_message(init_msg)
-
-        # 延迟触发欢迎动作（等前端同步 sessionid 过来）
-        def _trigger_welcome():
-            time.sleep(1.5)  # 等前端定时器把 sessionid 同步过来
-            if lt.is_available():
-                lt.set_audiotype(2, lt_sessionid or "")
-        threading.Thread(target=_trigger_welcome, daemon=True).start()
 
         while True:
             message = _receive(ws)
