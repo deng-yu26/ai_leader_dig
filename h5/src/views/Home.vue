@@ -1024,7 +1024,7 @@ function scrollToBottom() {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #f4f6f4;
+  background: #f7f7f7;
   /* background: linear-gradient(180deg, #e8f5e9 0%, #dce8dc 40%, #cfdbcf 100%); */
 }
 
