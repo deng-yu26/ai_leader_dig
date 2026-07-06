@@ -57,3 +57,5 @@ logs/
 # ChromaDB 向量数据库全部忽略
 backend/chroma_db/
 backend/lingshan.db
+backend/chroma_db/b3ebaa29-bfab-489d-824e-ee928302b8eb/data_level0.bin
+backend/chroma_db/chroma.sqlite3
