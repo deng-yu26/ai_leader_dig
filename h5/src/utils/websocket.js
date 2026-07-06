@@ -23,7 +23,8 @@ export const WS_TYPE = {
   EMOTION: 'emotion',         // 情绪标签
   STATUS: 'status',           // 状态消息
   ERROR: 'error',             // 错误消息
-  DONE: 'done'                // 完成
+  DONE: 'done',               // 完成
+  ROUTE: 'route'              // 路线导航信息
 }
 
 export class WebSocketClient {
@@ -44,7 +45,8 @@ export class WebSocketClient {
       emotion: [],
       status: [],
       error: [],
-      done: []
+      done: [],
+      route: []
     }
   }
 
@@ -225,6 +227,9 @@ export class WebSocketClient {
         break
       case WS_TYPE.DONE:
         this._emit('done', data)
+        break
+      case WS_TYPE.ROUTE:
+        this._emit('route', data)
         break
       case WS_TYPE.HEARTBEAT:
         // 心跳响应，不需要处理

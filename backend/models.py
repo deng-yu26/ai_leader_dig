@@ -79,6 +79,7 @@ class ChatLog(db.Model):
     __tablename__ = "chat_log"
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    session_id = db.Column(db.String(64), default="", comment="会话ID（同一会话的多轮对话共享）")
     user_id = db.Column(db.Integer, nullable=False, comment="用户唯一标识")
     question_text = db.Column(db.Text, nullable=False, comment="用户提问文本")
     answer_text = db.Column(db.Text, nullable=False, comment="AI完整回答文本")
@@ -88,10 +89,12 @@ class ChatLog(db.Model):
     digital_human_id = db.Column(db.Integer, default=1, comment="使用数字人形象ID")
     tts_voice = db.Column(db.String(64), default="zh-CN-XiaoxiaoNeural", comment="使用TTS音色ID")
     image_path = db.Column(db.String(256), nullable=True, comment="用户上传的图片路径（可选）")
+    route_data = db.Column(db.Text, nullable=True, comment="路线规划JSON数据（可选）")
 
     def to_dict(self):
         return {
             "id": self.id,
+            "session_id": self.session_id,
             "user_id": self.user_id,
             "question_text": self.question_text,
             "answer_text": self.answer_text,
@@ -100,7 +103,8 @@ class ChatLog(db.Model):
             "voice_duration": self.voice_duration,
             "digital_human_id": self.digital_human_id,
             "tts_voice": self.tts_voice,
-            "image_path": self.image_path
+            "image_path": self.image_path,
+            "route_data": json.loads(self.route_data) if self.route_data else None
         }
 
     def __repr__(self):

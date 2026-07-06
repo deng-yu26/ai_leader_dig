@@ -7,6 +7,7 @@
 
 import os
 import sys
+import json
 import uuid
 from datetime import datetime
 
@@ -179,26 +180,55 @@ def get_route_plan():
 # ======================== 6. 个人对话历史 ========================
 @user_bp.route("/chat-history", methods=["GET"])
 def get_chat_history():
-    """获取当前用户的对话历史记录"""
+    """获取对话历史——按会话分组，支持多轮对话展示"""
     user_id = session.get("user_id")
     if not user_id:
-        return jsonify({"code": 401, "message": "未登录"})
+        user_id = 0  # 兼容未登录
 
     page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 20, type=int)
+    per_page = request.args.get("per_page", 10, type=int)
 
-    pagination = ChatLog.query.filter_by(user_id=user_id)\
-        .order_by(ChatLog.question_time.desc())\
-        .paginate(page=page, per_page=per_page, error_out=False)
+    from sqlalchemy import desc
+    pagination = ChatLog.query.filter(
+        (ChatLog.user_id == user_id) | (ChatLog.user_id == 0)
+    ).order_by(desc(ChatLog.question_time))\
+     .paginate(page=page, per_page=per_page * 5, error_out=False)
+
+    # 按 session_id 分组
+    sessions_map = {}
+    ordered = []
+    for log in pagination.items:
+        sid = log.session_id or f"single_{log.id}"
+        if sid not in sessions_map:
+            sessions_map[sid] = {
+                "session_id": sid,
+                "title": log.question_text[:30],
+                "time": log.question_time.strftime("%m-%d %H:%M"),
+                "emotion": log.emotion_label,
+                "message_count": 0,
+                "route_data": None,
+                "messages": []
+            }
+            ordered.append(sid)
+        s = sessions_map[sid]
+        s["message_count"] += 1
+        s["messages"].append(log.to_dict())
+        if log.route_data and not s["route_data"]:
+            try:
+                s["route_data"] = json.loads(log.route_data)
+            except Exception:
+                pass
+
+    sessions = [sessions_map[sid] for sid in ordered]
+    total_sessions = len(sessions_map)
 
     return jsonify({
         "code": 200,
         "data": {
-            "items": [log.to_dict() for log in pagination.items],
-            "total": pagination.total,
+            "sessions": sessions,
+            "total": total_sessions,
             "page": page,
-            "per_page": per_page,
-            "pages": pagination.pages
+            "per_page": per_page
         }
     })
 
@@ -212,10 +242,8 @@ def get_ws_info():
     return jsonify({
         "code": 200,
         "data": {
-            # 使用 request.host（含端口），开发环境走 Vite proxy 时
-            # 自动返回 localhost:3000 → Vite 代理到后端 WS 端口；
-            # 生产环境直连 Flask 时返回实际端口。
             "ws_url": f"{ws_protocol}://{request.host}/ws/chat",
-            "user_id": session.get("user_id", 0)
+            "user_id": session.get("user_id", 0),
+            "map_key": "d4aa073ce5b461a2fbfbf97b2b16fd3d"
         }
     })

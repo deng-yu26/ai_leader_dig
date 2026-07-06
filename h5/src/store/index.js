@@ -77,36 +77,41 @@ export const useDigitalHumanStore = defineStore('digitalHuman', {
 // ===== 对话状态 =====
 export const useChatStore = defineStore('chat', {
   state: () => ({
-    messages: [],       // 对话消息列表
-    isProcessing: false, // AI是否正在回复
-    currentEmotion: '平静', // 当前情绪标签
-    isSpeaking: false,   // 是否正在语音播报
+    messages: JSON.parse(localStorage.getItem('chat_messages') || '[]'),
+    isProcessing: false,
+    currentEmotion: '平静',
+    isSpeaking: false,
     currentDhId: parseInt(localStorage.getItem('dh_id') || '1'),
-    rtcState: 'disconnected'  // LiveTalking WebRTC 连接状态
+    rtcState: 'disconnected'
   }),
 
   actions: {
     // 添加用户消息
     addUserMessage(text, type = 'text', imageUrl = null) {
-      this.messages.push({
+      const msg = {
         id: Date.now(),
         role: 'user',
         type,
         text,
         imageUrl,
         time: new Date().toLocaleTimeString()
-      })
+      }
+      this.messages.push(msg)
+      this.persistMessages()
     },
 
     // 添加AI消息
-    addAiMessage(text) {
-      this.messages.push({
+    addAiMessage(text, routeInfo = null) {
+      const msg = {
         id: Date.now(),
         role: 'ai',
         text,
         time: new Date().toLocaleTimeString(),
-        emotion: this.currentEmotion
-      })
+        emotion: this.currentEmotion,
+        routeInfo
+      }
+      this.messages.push(msg)
+      this.persistMessages()
     },
 
     // 更新最后一条AI消息（流式追加）
@@ -114,6 +119,7 @@ export const useChatStore = defineStore('chat', {
       const lastMsg = this.messages[this.messages.length - 1]
       if (lastMsg && lastMsg.role === 'ai') {
         lastMsg.text += text
+        this.persistMessages()
       } else {
         this.addAiMessage(text)
       }
@@ -132,6 +138,11 @@ export const useChatStore = defineStore('chat', {
     // 清空对话
     clearMessages() {
       this.messages = []
+      this.persistMessages()
+    },
+
+    persistMessages() {
+      localStorage.setItem('chat_messages', JSON.stringify(this.messages))
     },
 
     // 设置 LiveTalking RTC 连接状态
