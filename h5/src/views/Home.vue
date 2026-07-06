@@ -875,10 +875,12 @@ function scrollToBottom() {
 }
 /* 视频撑满全身，裁切只露上半身 */
 .live2d-compact :deep(.digital-human-video) {
+  position: absolute;
+  top: -20px;
   object-fit: contain;
-  object-position: top center;
+  object-position: top;
   width: 100%;
-  height: auto;
+  height: 230%;
   min-height: 250%;
 }
 

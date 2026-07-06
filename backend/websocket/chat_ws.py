@@ -282,15 +282,40 @@ def handle_chat(ws):
             _pending_lt_waits.append((interrupt_flag, ws, full_answer, lt_sessionid, lt))
 
             def _wait_lt_finish():
+                # 阶段1：等待 LiveTalking 开始说话（最多等 10 秒）
                 waited = 0.0
-                while waited < 30.0:  # 最长等 30 秒
+                speaking_started = False
+                while waited < 10.0:
+                    if interrupt_flag['interrupted']:
+                        return
+                    time.sleep(0.3)
+                    waited += 0.3
+                    try:
+                        if lt.is_speaking(lt_sessionid):
+                            speaking_started = True
+                            print(f"[LiveTalking] 开始说话，等待了 {waited:.1f}s")
+                            break
+                    except Exception:
+                        pass
+
+                if not speaking_started:
+                    # 超时未检测到说话，可能 LiveTalking 离线或 session 不对
+                    print(f"[LiveTalking] 等待说话超时，直接发 done")
+                    if not interrupt_flag['interrupted']:
+                        _send(ws, {"type": MSG_TYPE_DONE, "data": ""})
+                    _pending_lt_waits[:] = [x for x in _pending_lt_waits if x[0] is not interrupt_flag]
+                    return
+
+                # 阶段2：等待 LiveTalking 停止说话（最多等 60 秒）
+                waited = 0.0
+                while waited < 60.0:
                     if interrupt_flag['interrupted']:
                         return
                     time.sleep(0.3)
                     waited += 0.3
                     try:
                         if not lt.is_speaking(lt_sessionid):
-                            print(f"[LiveTalking] 说话结束，等待了 {waited:.1f}s")
+                            print(f"[LiveTalking] 说话结束，总等待 {waited:.1f}s")
                             break
                     except Exception:
                         pass
@@ -300,13 +325,8 @@ def handle_chat(ws):
                         _send(ws, {"type": MSG_TYPE_DONE, "data": ""})
                     except Exception:
                         pass
-                # 清理
-                try:
-                    _pending_lt_waits.remove(
-                        (interrupt_flag, ws, full_answer, lt_sessionid, lt)
-                    )
-                except ValueError:
-                    pass
+                # 清理（用列表推导避免 remove 因对象不一致而失败）
+                _pending_lt_waits[:] = [x for x in _pending_lt_waits if x[0] is not interrupt_flag]
 
             t = threading.Thread(target=_wait_lt_finish, daemon=True)
             t.start()
