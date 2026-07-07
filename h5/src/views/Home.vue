@@ -23,173 +23,148 @@
       </van-button>
     </div>
 
-    <!-- ========== 模式 A：全屏数字人 ========== -->
-    <template v-if="viewMode === 'full'">
-      <div class="content-area full-mode">
-        <!-- 数字人全身 -->
-        <div class="live2d-container live2d-full" @click="onTapCharacter">
-          <Live2DViewer
-            ref="live2dRef"
-            :emotion="chatStore.currentEmotion"
-            :is-speaking="chatStore.isSpeaking"
-            :dh-id="dhStore.currentId"
-          />
-          <div class="emotion-badge" v-if="chatStore.currentEmotion !== '平静'">
-            {{ chatStore.currentEmotion === '热情' ? '🔥' : '😊' }}
-            {{ chatStore.currentEmotion }}
-          </div>
-          <!-- 通话状态指示 -->
-          <div class="call-indicator" v-if="callActive">
-            <span class="call-dot"></span> 通话中
-          </div>
+    <!-- ===== 内容区（数字人跨模式持久，v-show 切布局） ===== -->
+    <div class="content-area" :class="viewMode === 'full' ? 'full-mode' : 'chat-mode'">
+      <!-- 数字人：唯一实例，切换 class 而非销毁重建 -->
+      <div
+        :class="['live2d-container', viewMode === 'full' ? 'live2d-full' : 'live2d-compact']"
+        @click="onAvatarClick"
+      >
+        <Live2DViewer
+          ref="live2dRef"
+          :emotion="chatStore.currentEmotion"
+          :is-speaking="chatStore.isSpeaking"
+          :dh-id="dhStore.currentId"
+        />
+        <div class="emotion-badge" v-if="chatStore.currentEmotion !== '平静'">
+          {{ chatStore.currentEmotion === '热情' ? '🔥' : '😊' }}
+          {{ chatStore.currentEmotion }}
+        </div>
+        <!-- 通话状态指示（仅模式A） -->
+        <div class="call-indicator" v-if="callActive && viewMode === 'full'">
+          <span class="call-dot"></span> 通话中
         </div>
       </div>
 
-      <!-- 底部通话操作栏 -->
-      <div class="action-bar">
-        <div class="action-btn mute" :class="{ active: audioMuted }" @click="toggleMute">
-          <van-icon :name="audioMuted ? 'volume-o' : 'volume-o'" size="22" />
-          <span>{{ audioMuted ? '已静音' : '静音' }}</span>
+      <!-- 模式B：对话区 -->
+      <div v-show="viewMode === 'chat'" class="chat-bubbles" ref="bubbleRef">
+        <div v-if="messages.length === 0" class="chat-empty">
+          <div class="empty-icon">💬</div>
+          <p class="empty-text">输入你的问题，AI导游为你解答</p>
         </div>
-        <div class="action-btn call" :class="{ active: callActive }" @click="toggleCall">
-          <van-icon name="phone-o" size="32" />
-          <span>{{ callActive ? '挂断' : '通话' }}</span>
-        </div>
-        <div class="action-btn text" @click="openTextChat">
-          <van-icon name="chat-o" size="22" />
-          <span>文字</span>
+
+        <div
+          v-for="(msg, i) in messages"
+          :key="`${msg.id}-${i}`"
+          :class="['bubble', msg.role === 'user' ? 'user-bubble' : 'ai-bubble']"
+        >
+          <div class="bubble-avatar" v-if="msg.role === 'user'">👤</div>
+          <div class="bubble-content">
+            <div class="bubble-text thinking" v-if="msg.role === 'ai' && !msg.text">
+              <template v-if="i === messages.length - 1 && chatStore.isProcessing">
+                <span class="dot-pulse"></span>
+              </template>
+              <template v-else>
+                <span class="stopped-text">已停止思考</span>
+              </template>
+            </div>
+            <div class="bubble-text" v-else>{{ msg.text }}</div>
+            <div v-if="msg.role === 'ai' && msg.routeInfo" class="route-action">
+              <van-button size="small" round plain type="primary" @click="openRouteMap(msg.routeInfo)">
+                查看地图
+              </van-button>
+            </div>
+            <div class="bubble-meta">
+              <span class="bubble-time">{{ msg.time }}</span>
+              <span class="bubble-emotion" v-if="msg.emotion && msg.emotion !== '平静'">
+                {{ msg.emotion === '热情' ? '🔥' : '😊' }} {{ msg.emotion }}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
-    </template>
+    </div>
 
-    <!-- ========== 模式 B：对话模式 ========== -->
-    <template v-if="viewMode === 'chat'">
-      <div class="content-area chat-mode">
-        <!-- 数字人区（上方 40%，点击切回模式A） -->
-        <div class="live2d-container live2d-compact" @click="closeTextChat">
-          <Live2DViewer
-            ref="live2dRef"
-            :emotion="chatStore.currentEmotion"
-            :is-speaking="chatStore.isSpeaking"
-            :dh-id="dhStore.currentId"
+    <!-- 模式A：通话操作栏 -->
+    <div v-show="viewMode === 'full'" class="action-bar">
+      <div class="action-btn mute" :class="{ active: audioMuted }" @click="toggleMute">
+        <van-icon :name="audioMuted ? 'volume-o' : 'volume-o'" size="22" />
+        <span>{{ audioMuted ? '已静音' : '静音' }}</span>
+      </div>
+      <div class="action-btn call" :class="{ active: callActive }" @click="toggleCall">
+        <van-icon name="phone-o" size="32" />
+        <span>{{ callActive ? '挂断' : '通话' }}</span>
+      </div>
+      <div class="action-btn text" @click="openTextChat">
+        <van-icon name="chat-o" size="22" />
+        <span>文字</span>
+      </div>
+    </div>
+
+    <!-- 模式B：底部输入栏 -->
+    <div v-show="viewMode === 'chat'" class="input-bar">
+      <div class="input-wrapper">
+        <van-icon name="photo-o" size="22" color="#5b8c5a" @click="showImageUpload = true" />
+
+        <template v-if="!voiceMode">
+          <input
+            v-model="inputText"
+            class="text-input"
+            placeholder="输入问题..."
+            @keydown.enter="sendText"
           />
-          <div class="emotion-badge" v-if="chatStore.currentEmotion !== '平静'">
-            {{ chatStore.currentEmotion === '热情' ? '🔥' : '😊' }}
-            {{ chatStore.currentEmotion }}
-          </div>
-        </div>
+          <van-icon
+            v-if="chatStore.isProcessing || chatStore.isSpeaking"
+            name="stop-circle-o"
+            color="#e74c3c"
+            size="22"
+            @click="stopReply"
+          />
+          <van-icon
+            v-else
+            name="volume-o"
+            color="#5b8c5a"
+            size="22"
+            @click="enterVoiceMode"
+          />
+          <van-icon
+            v-if="inputText.trim() && !chatStore.isProcessing && !chatStore.isSpeaking"
+            name="arrow-up"
+            size="20"
+            color="#fff"
+            class="send-btn"
+            @click="sendText"
+          />
+        </template>
 
-        <!-- 对话区（下方 60%） -->
-        <div class="chat-bubbles" ref="bubbleRef">
-          <div v-if="messages.length === 0" class="chat-empty">
-            <div class="empty-icon">💬</div>
-            <p class="empty-text">输入你的问题，AI导游为你解答</p>
-          </div>
-
+        <template v-else>
           <div
-            v-for="(msg, i) in messages"
-            :key="`${msg.id}-${i}`"
-            :class="['bubble', msg.role === 'user' ? 'user-bubble' : 'ai-bubble']"
+            :class="['hold-to-speak', { recording: isRecording }]"
+            @mousedown.prevent="startHoldSpeak"
+            @mouseup.prevent="stopHoldSpeak"
+            @mouseleave.prevent="stopHoldSpeak"
+            @touchstart.prevent="startHoldSpeak"
+            @touchend.prevent="stopHoldSpeak"
           >
-            <div class="bubble-avatar" v-if="msg.role === 'user'">👤</div>
-            <div class="bubble-content">
-              <!-- AI 思考中 / 已停止 -->
-              <div class="bubble-text thinking" v-if="msg.role === 'ai' && !msg.text">
-                <template v-if="i === messages.length - 1 && chatStore.isProcessing">
-                  <span class="dot-pulse"></span>
-                </template>
-                <template v-else>
-                  <span class="stopped-text">已停止思考</span>
-                </template>
-              </div>
-              <div class="bubble-text" v-else>{{ msg.text }}</div>
-              <div v-if="msg.role === 'ai' && msg.routeInfo" class="route-action">
-                <van-button size="small" round plain type="primary" @click="openRouteMap(msg.routeInfo)">
-                  查看地图
-                </van-button>
-              </div>
-              <div class="bubble-meta">
-                <span class="bubble-time">{{ msg.time }}</span>
-                <span class="bubble-emotion" v-if="msg.emotion && msg.emotion !== '平静'">
-                  {{ msg.emotion === '热情' ? '🔥' : '😊' }} {{ msg.emotion }}
-                </span>
-              </div>
-            </div>
+            {{ isRecording ? '🎙️ 正在聆听...' : '🎙️ 请按住说话' }}
           </div>
-        </div>
+          <van-icon
+            v-if="chatStore.isProcessing || chatStore.isSpeaking"
+            name="stop-circle-o"
+            color="#e74c3c"
+            size="22"
+            @click="stopReply"
+          />
+          <van-icon
+            v-else-if="!isRecording"
+            name="chat-o"
+            color="#5b8c5a"
+            size="22"
+            @click="exitVoiceMode"
+          />
+        </template>
       </div>
-
-      <!-- 底部输入栏 -->
-      <div class="input-bar">
-        <div class="input-wrapper">
-          <!-- 图片上传（始终显示） -->
-          <van-icon name="photo-o" size="22" color="#5b8c5a" @click="showImageUpload = true" />
-
-          <!-- 文字输入模式 -->
-          <template v-if="!voiceMode">
-            <input
-              v-model="inputText"
-              class="text-input"
-              placeholder="输入问题..."
-              @keydown.enter="sendText"
-            />
-            <!-- 打断按钮（覆盖语音入口） / 语音入口 -->
-            <van-icon
-              v-if="chatStore.isProcessing || chatStore.isSpeaking"
-              name="stop-circle-o"
-              color="#e74c3c"
-              size="22"
-              @click="stopReply"
-            />
-            <van-icon
-              v-else
-              name="volume-o"
-              color="#5b8c5a"
-              size="22"
-              @click="enterVoiceMode"
-            />
-            <!-- 发送按钮（思考中隐藏，防止重复发送） -->
-            <van-icon
-              v-if="inputText.trim() && !chatStore.isProcessing && !chatStore.isSpeaking"
-              name="arrow-up"
-              size="20"
-              color="#fff"
-              class="send-btn"
-              @click="sendText"
-            />
-          </template>
-
-          <!-- 语音模式 -->
-          <template v-else>
-            <div
-              :class="['hold-to-speak', { recording: isRecording }]"
-              @mousedown.prevent="startHoldSpeak"
-              @mouseup.prevent="stopHoldSpeak"
-              @mouseleave.prevent="stopHoldSpeak"
-              @touchstart.prevent="startHoldSpeak"
-              @touchend.prevent="stopHoldSpeak"
-            >
-              {{ isRecording ? '🎙️ 正在聆听...' : '🎙️ 请按住说话' }}
-            </div>
-            <!-- 打断按钮（覆盖编辑入口，录音时都不显示） -->
-            <van-icon
-              v-if="chatStore.isProcessing || chatStore.isSpeaking"
-              name="stop-circle-o"
-              color="#e74c3c"
-              size="22"
-              @click="stopReply"
-            />
-            <van-icon
-              v-else-if="!isRecording"
-              name="chat-o"
-              color="#5b8c5a"
-              size="22"
-              @click="exitVoiceMode"
-            />
-          </template>
-        </div>
-      </div>
-    </template>
+    </div>
 
     <!-- 模式A文字输入弹窗 -->
     <van-popup v-model:show="showTextPopup" position="bottom" round :style="{ minHeight: '40%' }">
@@ -860,9 +835,11 @@ function stopReply() {
   closeToast()
 }
 
-// ===== 点击数字人 → 打断 =====
-function onTapCharacter() {
-  if (chatStore.isProcessing || chatStore.isSpeaking) {
+// ===== 点击数字人（模式A打断 / 模式B切回） =====
+function onAvatarClick() {
+  if (viewMode.value === 'chat') {
+    closeTextChat()
+  } else if (chatStore.isProcessing || chatStore.isSpeaking) {
     stopReply()
   }
 }
